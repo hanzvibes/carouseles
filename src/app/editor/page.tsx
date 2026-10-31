@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createEmptyCarouselDocument,
@@ -24,22 +26,63 @@ export default function EditorPage() {
   const [ready, setReady] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [cloudUserId, setCloudUserId] = useState<string | null>(null);
+  const [cloudProjectId, setCloudProjectId] = useState<string | null>(null);
+  const [cloudStatus, setCloudStatus] = useState("Local draft");
+  const [cloudError, setCloudError] = useState("");
   const [exportStatus, setExportStatus] = useState("");
   const imageInputRef = useRef<HTMLInputElement>(null);
   const interactionRef = useRef<{ id: string; mode: "move" | "resize"; pointerX: number; pointerY: number; x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = validateCarouselDocument(JSON.parse(raw));
-        setDocument(parsed);
-        setActivePageId(parsed.pages[0].id);
+    let cancelled = false;
+
+    async function initializeEditor() {
+      let localDocument: CarouselDocument | null = null;
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) localDocument = validateCarouselDocument(JSON.parse(raw));
+      } catch {
+        // Keep working with a fresh document if the local draft is invalid.
       }
-    } catch {
-      // Ignore an invalid local draft and start with a fresh document.
+
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) {
+        if (!cancelled && localDocument) {
+          setDocument(localDocument);
+          setActivePageId(localDocument.pages[0].id);
+        }
+        if (!cancelled) {
+          setCloudStatus("Local only · configure Supabase");
+          setReady(true);
+        }
+        return;
+      }
+
+      try {
+        const bootstrap = await bootstrapCloudDocument(supabase, localDocument);
+        if (cancelled) return;
+        setDocument(bootstrap.document);
+        setActivePageId(bootstrap.document.pages[0].id);
+        setCloudUserId(bootstrap.user.id);
+        setCloudProjectId(bootstrap.projectId);
+        setCloudStatus("Cloud connected");
+        setCloudError("");
+      } catch (error) {
+        if (cancelled) return;
+        if (localDocument) {
+          setDocument(localDocument);
+          setActivePageId(localDocument.pages[0].id);
+        }
+        setCloudStatus("Local draft · sign in to sync");
+        setCloudError(error instanceof Error ? error.message : "Cloud connection failed");
+      } finally {
+        if (!cancelled) setReady(true);
+      }
     }
-    setReady(true);
+
+    void initializeEditor();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -55,6 +98,24 @@ export default function EditorPage() {
     }, 350);
     return () => window.clearTimeout(timeout);
   }, [document, ready]);
+
+  useEffect(() => {
+    if (!ready || !cloudUserId || !cloudProjectId) return;
+    const timeout = window.setTimeout(async () => {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) return;
+      setCloudStatus("Syncing…");
+      try {
+        await saveCloudDocument(supabase, cloudProjectId, cloudUserId, document);
+        setCloudStatus("Saved to cloud");
+        setCloudError("");
+      } catch (error) {
+        setCloudStatus("Cloud save failed · local draft kept");
+        setCloudError(error instanceof Error ? error.message : "Cloud save failed");
+      }
+    }, 900);
+    return () => window.clearTimeout(timeout);
+  }, [document, ready, cloudUserId, cloudProjectId]);
 
   useEffect(() => {
     if (!ready) return;
@@ -268,6 +329,19 @@ export default function EditorPage() {
     }, "image/png");
   }
 
+  async function signOut() {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setCloudError(error.message);
+      return;
+    }
+    setCloudUserId(null);
+    setCloudProjectId(null);
+    setCloudStatus("Signed out · local draft kept");
+  }
+
   function renameDocument(value: string) {
     setDocument((current) => ({ ...current, title: value || "Untitled carousel" }));
   }
@@ -279,10 +353,11 @@ export default function EditorPage() {
           <Link href="/" className="editor-back" aria-label="Back to dashboard">←</Link>
           <span className="editor-brand-mark">c.</span>
           <input className="document-title" aria-label="Project title" value={document.title} onChange={(event) => renameDocument(event.target.value)} />
-          <span className="save-indicator"><i />{saveError ? "Storage full" : savedAt ? "Saved locally" : ready ? "Saving…" : "Loading…"}</span>
+          <span className="save-indicator"><i />{saveError ? "Storage full" : cloudStatus}</span>
         </div>
         <div className="editor-top-actions">
           <span className="editor-dimensions">1080 × 1350</span>
+          {cloudUserId ? <button className="editor-export" onClick={signOut}>Sign out</button> : <Link className="editor-export" href="/login">Sign in to sync</Link>}
           <button className="editor-export" onClick={exportPng}>Export PNG ↗</button>
         </div>
       </header>
@@ -335,7 +410,7 @@ export default function EditorPage() {
               )}
             </div>
           </div>
-          <div className="canvas-footer"><span>CAROUSEL CORE · SCHEMA V1</span><span>{exportStatus || `${activePage?.elements.length ?? 0} elements`}</span></div>
+          <div className="canvas-footer"><span>CAROUSEL CORE · SCHEMA V1</span><span>{exportStatus || cloudError || `${activePage?.elements.length ?? 0} elements`}</span></div>
         </section>
 
         <aside className="editor-inspector">
