@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createEmptyCarouselDocument,
   type CarouselDocument,
-  type CarouselElement
+  type CarouselElement,
+  validateCarouselDocument
 } from "@/lib/carousel-core/schema";
 
 const STORAGE_KEY = "carouseles:local-draft:v1";
@@ -27,11 +28,9 @@ export default function EditorPage() {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as CarouselDocument;
-        if (parsed.schemaVersion === 1 && Array.isArray(parsed.pages) && parsed.pages.length) {
-          setDocument(parsed);
-          setActivePageId(parsed.pages[0].id);
-        }
+        const parsed = validateCarouselDocument(JSON.parse(raw));
+        setDocument(parsed);
+        setActivePageId(parsed.pages[0].id);
       }
     } catch {
       // Ignore an invalid local draft and start with a fresh document.
@@ -51,6 +50,27 @@ export default function EditorPage() {
     }, 350);
     return () => window.clearTimeout(timeout);
   }, [document, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const prompt = window.localStorage.getItem("carouseles:pending-prompt");
+    if (!prompt) return;
+    window.localStorage.removeItem("carouseles:pending-prompt");
+    setDocument((current) => {
+      const firstPage = current.pages[0];
+      if (!firstPage || firstPage.elements.length > 0) return current;
+      const headline: CarouselElement = {
+        id: makeId(), type: "text", x: 90, y: 150, width: 900, height: 430,
+        rotation: 0, content: prompt,
+        style: { color: "#171717", fontSize: 68, fontFamily: "Manrope", fontWeight: "bold", textAlign: "left" }
+      };
+      return {
+        ...current,
+        title: prompt.length > 42 ? `${prompt.slice(0, 39)}…` : prompt,
+        pages: current.pages.map((page, index) => index === 0 ? { ...page, elements: [headline] } : page)
+      };
+    });
+  }, [ready]);
 
   const activePage = useMemo(
     () => document.pages.find((page) => page.id === activePageId) ?? document.pages[0],
