@@ -91,7 +91,7 @@ export default function EditorPage() {
     }));
   }, [activePage]);
 
-  function startInteraction(event: React.PointerEvent<HTMLDivElement>, element: CarouselElement, mode: "move" | "resize") {
+  function startInteraction(event: React.PointerEvent<HTMLElement>, element: CarouselElement, mode: "move" | "resize") {
     event.preventDefault();
     event.stopPropagation();
     setSelectedId(element.id);
@@ -99,7 +99,8 @@ export default function EditorPage() {
       id: element.id, mode, pointerX: event.clientX, pointerY: event.clientY,
       x: element.x, y: element.y, width: element.width, height: element.height
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    const captureTarget = event.currentTarget.closest(".canvas-element") as HTMLElement | null;
+    captureTarget?.setPointerCapture(event.pointerId);
   }
 
   function moveInteraction(event: React.PointerEvent<HTMLDivElement>) {
@@ -125,7 +126,8 @@ export default function EditorPage() {
 
   function endInteraction(event: React.PointerEvent<HTMLDivElement>) {
     interactionRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    const captureTarget = event.currentTarget.closest(".canvas-element") as HTMLElement | null;
+    if (captureTarget?.hasPointerCapture(event.pointerId)) captureTarget.releasePointerCapture(event.pointerId);
   }
 
   function addImage(file?: File) {
@@ -212,6 +214,16 @@ export default function EditorPage() {
         context.beginPath();
         context.roundRect(-element.width / 2, -element.height / 2, element.width, element.height, radius);
         context.fill();
+      } else if (element.type === "image") {
+        try {
+          const image = new window.Image();
+          image.src = element.content;
+          await image.decode();
+          context.drawImage(image, -element.width / 2, -element.height / 2, element.width, element.height);
+        } catch {
+          context.fillStyle = "#eeeeee";
+          context.fillRect(-element.width / 2, -element.height / 2, element.width, element.height);
+        }
       } else if (element.type === "text") {
         const fontSize = element.style.fontSize ?? 40;
         context.fillStyle = element.style.color ?? "#171717";
@@ -241,7 +253,7 @@ export default function EditorPage() {
       anchor.href = url;
       anchor.download = `${document.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-slide.png`;
       anchor.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       setExportStatus("PNG downloaded");
       window.setTimeout(() => setExportStatus(""), 2500);
     }, "image/png");
