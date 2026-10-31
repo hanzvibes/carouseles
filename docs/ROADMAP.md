@@ -4,7 +4,8 @@
 - [x] Initial canonical schema definition
 - [x] Schema tests and document validation
 - [x] App shell and responsive dashboard
-- [x] Multi-slide visual editor (text and shape elements)
+- [x] Multi-slide visual editor (text, shapes, drag, resize)
+- [x] Image upload and replacement (local drafts)
 - [x] Browser-local draft persistence
 - [ ] Cloud project persistence and autosave
 - [ ] Provider manager and secure credential storage
