@@ -8,6 +8,7 @@ import {
 type CloudDocumentRow = { id: string; document: unknown };
 const ASSET_BUCKET = "carouseles-assets";
 const STORAGE_PREFIX = "storage://";
+const uploadedImageContent = new Map<string, string>();
 
 export type CloudBootstrap = { user: User; projectId: string; document: CarouselDocument };
 
@@ -57,23 +58,27 @@ async function uploadDocumentImages(
     elements: await Promise.all(page.elements.map(async (element) => {
       if (element.type !== "image" || !element.content.startsWith("data:")) return element;
       const blob = await dataUrlToBlob(element.content);
+      if (blob.size === 0 || blob.size > 10 * 1024 * 1024) throw new Error("Image must be between 1 byte and 10 MB.");
       const mimeType = blob.type || "image/png";
       const extension = extensionForMime(mimeType);
       const storagePath = `${userId}/${document.id}/${encodeURIComponent(element.id)}.${extension}`;
-      const upload = await supabase.storage.from(ASSET_BUCKET).upload(storagePath, blob, {
-        contentType: mimeType, upsert: true, cacheControl: "3600"
-      });
-      if (upload.error) throw upload.error;
+      if (uploadedImageContent.get(storagePath) !== element.content) {
+        const upload = await supabase.storage.from(ASSET_BUCKET).upload(storagePath, blob, {
+          contentType: mimeType, upsert: true, cacheControl: "3600"
+        });
+        if (upload.error) throw upload.error;
 
-      const metadata = await supabase.from("carouseles_assets").upsert({
-        user_id: userId,
-        document_id: document.id,
-        storage_path: storagePath,
-        file_name: `carousel-image.${extension}`,
-        mime_type: mimeType,
-        file_size: blob.size
-      }, { onConflict: "storage_path" });
-      if (metadata.error) throw metadata.error;
+        const metadata = await supabase.from("carouseles_assets").upsert({
+          user_id: userId,
+          document_id: document.id,
+          storage_path: storagePath,
+          file_name: `carousel-image.${extension}`,
+          mime_type: mimeType,
+          file_size: blob.size
+        }, { onConflict: "storage_path" });
+        if (metadata.error) throw metadata.error;
+        uploadedImageContent.set(storagePath, element.content);
+      }
       return { ...element, content: `${STORAGE_PREFIX}${storagePath}` };
     }))
   })));
