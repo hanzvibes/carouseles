@@ -53,6 +53,7 @@ export default function EditorPage() {
     let cancelled = false;
 
     async function initializeEditor() {
+      let authenticatedUserId: string | null = null;
       const supabase = createSupabaseBrowserClient();
 
       if (!supabase) {
@@ -88,6 +89,8 @@ export default function EditorPage() {
         }
 
         const userId = auth.data.user.id;
+        authenticatedUserId = userId;
+        setCloudUserId(userId);
         const localDocument = readLocalDraft(userStorageKey(userId));
         const bootstrap = await bootstrapCloudDocument(supabase, localDocument);
         if (cancelled) return;
@@ -100,7 +103,9 @@ export default function EditorPage() {
         setCloudError("");
       } catch (error) {
         if (cancelled) return;
-        const localDocument = readLocalDraft(ANONYMOUS_STORAGE_KEY, true);
+        const localDocument = authenticatedUserId
+          ? readLocalDraft(userStorageKey(authenticatedUserId))
+          : readLocalDraft(ANONYMOUS_STORAGE_KEY, true);
         if (localDocument) {
           setDocument(localDocument);
           setActivePageId(localDocument.pages[0].id);
