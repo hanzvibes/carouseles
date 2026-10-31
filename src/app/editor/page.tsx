@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import AiEditPanel from "./ai-edit-panel";
+import { applySlideTextEdits } from "@/lib/carousel-core/ai-editing";
 import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
 import { createLatestSaveQueue, type LatestSaveQueue } from "@/lib/carousel-core/latest-save-queue";
 import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey } from "@/lib/carousel-core/draft-storage";
@@ -514,6 +516,18 @@ export default function EditorPage() {
               <div className="core-note"><span>✳</span><b>Powered by Carousel Core</b><small>Your design is stored as structured JSON, independent from the visual editor.</small></div>
             </div>
           )}
+        <AiEditPanel
+          elements={activePage?.elements ?? []}
+          onApply={(edits) => {
+            try {
+              const updatedElements = applySlideTextEdits(activePage?.elements ?? [], edits);
+              updatePage(() => updatedElements);
+              setExportStatus("AI edits applied");
+            } catch {
+              setExportStatus("AI edits could not be applied.");
+            }
+          }}
+        />
         </aside>
       </div>
 
