@@ -4,6 +4,7 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
 import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey } from "@/lib/carousel-core/draft-storage";
+import { createLatestSaveQueue } from "@/lib/carousel-core/save-queue";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createEmptyCarouselDocument,
@@ -44,6 +45,25 @@ export default function EditorPage() {
   const [exportStatus, setExportStatus] = useState("");
   const imageInputRef = useRef<HTMLInputElement>(null);
   const interactionRef = useRef<{ id: string; mode: "move" | "resize"; pointerX: number; pointerY: number; x: number; y: number; width: number; height: number } | null>(null);
+
+  const cloudSaveQueueRef = useRef<((snapshot: { projectId: string; userId: string; document: CarouselDocument }) => void) | null>(null);
+  if (!cloudSaveQueueRef.current) {
+    cloudSaveQueueRef.current = createLatestSaveQueue(
+      async ({ projectId, userId, document: snapshot }) => {
+        const supabase = createSupabaseBrowserClient();
+        if (!supabase) throw new Error("Supabase is not configured.");
+        await saveCloudDocument(supabase, projectId, userId, snapshot);
+      },
+      () => {
+        setCloudStatus("Saved to cloud");
+        setCloudError("");
+      },
+      (error) => {
+        setCloudStatus("Cloud save failed · local draft kept");
+        setCloudError(error instanceof Error ? error.message : "Cloud save failed");
+      }
+    );
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -134,18 +154,13 @@ export default function EditorPage() {
 
   useEffect(() => {
     if (!ready || !cloudUserId || !cloudProjectId) return;
-    const timeout = window.setTimeout(async () => {
-      const supabase = createSupabaseBrowserClient();
-      if (!supabase) return;
+    const timeout = window.setTimeout(() => {
       setCloudStatus("Syncing…");
-      try {
-        await saveCloudDocument(supabase, cloudProjectId, cloudUserId, document);
-        setCloudStatus("Saved to cloud");
-        setCloudError("");
-      } catch (error) {
-        setCloudStatus("Cloud save failed · local draft kept");
-        setCloudError(error instanceof Error ? error.message : "Cloud save failed");
-      }
+      cloudSaveQueueRef.current?.({
+        projectId: cloudProjectId,
+        userId: cloudUserId,
+        document
+      });
     }, 900);
     return () => window.clearTimeout(timeout);
   }, [document, ready, cloudUserId, cloudProjectId]);
