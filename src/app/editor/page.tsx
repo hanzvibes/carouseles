@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createEmptyCarouselDocument,
   type CarouselDocument,
@@ -24,6 +24,8 @@ export default function EditorPage() {
   const [ready, setReady] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [exportStatus, setExportStatus] = useState("");
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const interactionRef = useRef<{ id: string; mode: "move" | "resize"; pointerX: number; pointerY: number; x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
     try {
@@ -88,6 +90,62 @@ export default function EditorPage() {
       )
     }));
   }, [activePage]);
+
+  function startInteraction(event: React.PointerEvent<HTMLDivElement>, element: CarouselElement, mode: "move" | "resize") {
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedId(element.id);
+    interactionRef.current = {
+      id: element.id, mode, pointerX: event.clientX, pointerY: event.clientY,
+      x: element.x, y: element.y, width: element.width, height: element.height
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveInteraction(event: React.PointerEvent<HTMLDivElement>) {
+    const interaction = interactionRef.current;
+    if (!interaction) return;
+    const canvas = event.currentTarget.closest(".design-canvas");
+    if (!(canvas instanceof HTMLElement)) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = document.width / rect.width;
+    const scaleY = document.height / rect.height;
+    const dx = (event.clientX - interaction.pointerX) * scaleX;
+    const dy = (event.clientY - interaction.pointerY) * scaleY;
+    setDocument((current) => ({
+      ...current,
+      pages: current.pages.map((page) => page.id !== activePage?.id ? page : {
+        ...page,
+        elements: page.elements.map((element) => element.id !== interaction.id ? element : interaction.mode === "move"
+          ? { ...element, x: Math.max(0, Math.min(document.width - element.width, interaction.x + dx)), y: Math.max(0, Math.min(document.height - element.height, interaction.y + dy)) }
+          : { ...element, width: Math.max(30, Math.min(document.width - interaction.x, interaction.width + dx)), height: Math.max(30, Math.min(document.height - interaction.y, interaction.height + dy)) })
+      })
+    }));
+  }
+
+  function endInteraction(event: React.PointerEvent<HTMLDivElement>) {
+    interactionRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function addImage(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setExportStatus("Choose an image file."); return; }
+    if (file.size > 5 * 1024 * 1024) { setExportStatus("Image must be 5 MB or smaller."); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const element: CarouselElement = {
+        id: makeId(), type: "image", x: 100, y: 160, width: 880, height: 620,
+        rotation: 0, content: String(reader.result),
+        style: { backgroundColor: "#eeeeee" }
+      };
+      updatePage((items) => [...items, element]);
+      setSelectedId(element.id);
+      setExportStatus("");
+    };
+    reader.onerror = () => setExportStatus("Could not read this image.");
+    reader.readAsDataURL(file);
+  }
 
   function addText() {
     const element: CarouselElement = {
@@ -204,7 +262,7 @@ export default function EditorPage() {
         </div>
         <div className="editor-top-actions">
           <span className="editor-dimensions">1080 × 1350</span>
-          <button className="editor-export" onClick={() => window.alert("PNG and PDF export are coming in the next phase.")}>Export ↗</button>
+          <button className="editor-export" onClick={exportPng}>Export PNG ↗</button>
         </div>
       </header>
 
@@ -213,7 +271,7 @@ export default function EditorPage() {
           <div className="tool-label">INSERT</div>
           <button className="tool-button" onClick={addText}><span className="tool-glyph">T</span><span>Text</span></button>
           <button className="tool-button" onClick={addShape}><span className="tool-glyph shape-glyph">▰</span><span>Shape</span></button>
-          <button className="tool-button disabled-tool" disabled title="Image support is coming soon"><span className="tool-glyph">▧</span><span>Image</span></button>
+          <button className="tool-button" onClick={() => imageInputRef.current?.click()}><span className="tool-glyph">▧</span><span>Image</span></button><input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => { addImage(event.target.files?.[0]); event.target.value = ""; }} />
           <div className="leftbar-hint">Select an element on the canvas to edit its content and style.</div>
         </aside>
 
@@ -240,9 +298,13 @@ export default function EditorPage() {
                     textAlign: element.style.textAlign ?? "left"
                   }}
                   onClick={(event) => { event.stopPropagation(); setSelectedId(element.id); }}
+                  onPointerDown={(event) => startInteraction(event, element, "move")}
+                  onPointerMove={moveInteraction}
+                  onPointerUp={endInteraction}
+                  onPointerCancel={endInteraction}
                 >
-                  {element.type === "text" ? element.content : null}
-                  {selectedId === element.id && <span className="selection-corner" />}
+                  {element.type === "text" ? element.content : element.type === "image" ? <img className="canvas-image" src={element.content} alt="Carousel element" draggable={false} /> : null}
+                  {selectedId === element.id && <span className="selection-corner" onPointerDown={(event) => startInteraction(event, element, "resize")} /> }
                 </div>
               ))}
               {(!activePage || activePage.elements.length === 0) && (
@@ -269,6 +331,7 @@ export default function EditorPage() {
                 <label className="field-label">Alignment</label>
                 <div className="alignment-row">{(["left", "center", "right"] as const).map((alignment) => <button key={alignment} className={selectedElement.style.textAlign === alignment ? "alignment-active" : ""} onClick={() => updateSelectedStyle("textAlign", alignment)}>{alignment === "left" ? "≡" : alignment === "center" ? "☰" : "≡"}</button>)}</div>
               </>}
+              {selectedElement.type === "image" && <><label className="field-label">Image</label><button className="delete-element" onClick={() => imageInputRef.current?.click()}>Replace image</button></>}
               {selectedElement.type === "shape" && <>
                 <label className="field-label">Fill color</label>
                 <input className="color-input" type="color" value={selectedElement.style.backgroundColor ?? "#7057e8"} onChange={(event) => updateSelectedStyle("backgroundColor", event.target.value)} />
