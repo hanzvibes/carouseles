@@ -170,6 +170,20 @@ export default function EditorPage() {
 
   useEffect(() => {
     if (!ready) return;
+    const generatedRaw = window.localStorage.getItem("carouseles:generated-document");
+    if (generatedRaw) {
+      window.localStorage.removeItem("carouseles:generated-document");
+      window.localStorage.removeItem("carouseles:pending-prompt");
+      try {
+        const generatedDocument = validateCarouselDocument(JSON.parse(generatedRaw));
+        setDocument(generatedDocument);
+        setActivePageId(generatedDocument.pages[0].id);
+        setSelectedId(null);
+        return;
+      } catch {
+        setExportStatus("Generated draft could not be loaded. Start a new carousel.");
+      }
+    }
     const prompt = window.localStorage.getItem("carouseles:pending-prompt");
     if (!prompt) return;
     window.localStorage.removeItem("carouseles:pending-prompt");
