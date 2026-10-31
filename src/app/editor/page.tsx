@@ -23,6 +23,7 @@ export default function EditorPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [saveError, setSaveError] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
   const imageInputRef = useRef<HTMLInputElement>(null);
   const interactionRef = useRef<{ id: string; mode: "move" | "resize"; pointerX: number; pointerY: number; x: number; y: number; width: number; height: number } | null>(null);
@@ -47,8 +48,9 @@ export default function EditorPage() {
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
         setSavedAt(new Date());
+        setSaveError(false);
       } catch {
-        // Storage may be unavailable or full; the editor remains usable in memory.
+        setSaveError(true);
       }
     }, 350);
     return () => window.clearTimeout(timeout);
@@ -133,7 +135,9 @@ export default function EditorPage() {
   function addImage(file?: File) {
     if (!file) return;
     if (!file.type.startsWith("image/")) { setExportStatus("Choose an image file."); return; }
-    if (file.size > 5 * 1024 * 1024) { setExportStatus("Image must be 5 MB or smaller."); return; }
+    if (file.size > 2 * 1024 * 1024) { setExportStatus("Image must be 2 MB or smaller."); return; }
+    const currentSize = new Blob([JSON.stringify(document)]).size;
+    if (currentSize + file.size * 1.4 > 3.5 * 1024 * 1024) { setExportStatus("This draft is near the browser storage limit. Remove an image first."); return; }
     const reader = new FileReader();
     reader.onload = () => {
       const imageData = String(reader.result);
@@ -275,7 +279,7 @@ export default function EditorPage() {
           <Link href="/" className="editor-back" aria-label="Back to dashboard">←</Link>
           <span className="editor-brand-mark">c.</span>
           <input className="document-title" aria-label="Project title" value={document.title} onChange={(event) => renameDocument(event.target.value)} />
-          <span className="save-indicator"><i />{savedAt ? "Saved locally" : ready ? "Saving…" : "Loading…"}</span>
+          <span className="save-indicator"><i />{saveError ? "Storage full" : savedAt ? "Saved locally" : ready ? "Saving…" : "Loading…"}</span>
         </div>
         <div className="editor-top-actions">
           <span className="editor-dimensions">1080 × 1350</span>
