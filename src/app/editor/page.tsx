@@ -11,7 +11,22 @@ import {
   validateCarouselDocument
 } from "@/lib/carousel-core/schema";
 
-const STORAGE_KEY = "carouseles:local-draft:v1";
+const ANONYMOUS_STORAGE_KEY = "carouseles:local-draft:anonymous:v1";
+const LEGACY_STORAGE_KEY = "carouseles:local-draft:v1";
+
+function userStorageKey(userId: string) {
+  return `carouseles:local-draft:user:${userId}:v1`;
+}
+
+function readLocalDraft(storageKey: string, legacyFallback = false): CarouselDocument | null {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+      ?? (legacyFallback ? window.localStorage.getItem(LEGACY_STORAGE_KEY) : null);
+    return raw ? validateCarouselDocument(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
 
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -38,16 +53,10 @@ export default function EditorPage() {
     let cancelled = false;
 
     async function initializeEditor() {
-      let localDocument: CarouselDocument | null = null;
-      try {
-        const raw = window.localStorage.getItem(STORAGE_KEY);
-        if (raw) localDocument = validateCarouselDocument(JSON.parse(raw));
-      } catch {
-        // Keep working with a fresh document if the local draft is invalid.
-      }
-
       const supabase = createSupabaseBrowserClient();
+
       if (!supabase) {
+        const localDocument = readLocalDraft(ANONYMOUS_STORAGE_KEY, true);
         if (!cancelled && localDocument) {
           setDocument(localDocument);
           setActivePageId(localDocument.pages[0].id);
@@ -60,8 +69,29 @@ export default function EditorPage() {
       }
 
       try {
+        const auth = await supabase.auth.getUser();
+        if (auth.error) throw auth.error;
+
+        if (!auth.data.user) {
+          // Never upload an anonymous draft into a signed-in account.
+          const localDocument = readLocalDraft(ANONYMOUS_STORAGE_KEY, true);
+          if (!cancelled && localDocument) {
+            setDocument(localDocument);
+            setActivePageId(localDocument.pages[0].id);
+          }
+          if (!cancelled) {
+            setCloudStatus("Local draft · sign in to sync");
+            setCloudError("");
+            setReady(true);
+          }
+          return;
+        }
+
+        const userId = auth.data.user.id;
+        const localDocument = readLocalDraft(userStorageKey(userId));
         const bootstrap = await bootstrapCloudDocument(supabase, localDocument);
         if (cancelled) return;
+
         setDocument(bootstrap.document);
         setActivePageId(bootstrap.document.pages[0].id);
         setCloudUserId(bootstrap.user.id);
@@ -70,6 +100,7 @@ export default function EditorPage() {
         setCloudError("");
       } catch (error) {
         if (cancelled) return;
+        const localDocument = readLocalDraft(ANONYMOUS_STORAGE_KEY, true);
         if (localDocument) {
           setDocument(localDocument);
           setActivePageId(localDocument.pages[0].id);
@@ -89,7 +120,7 @@ export default function EditorPage() {
     if (!ready) return;
     const timeout = window.setTimeout(() => {
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
+        const storageKey = cloudUserId ? userStorageKey(cloudUserId) : ANONYMOUS_STORAGE_KEY;\n        window.localStorage.setItem(storageKey, JSON.stringify(document));
         setSavedAt(new Date());
         setSaveError(false);
       } catch {
