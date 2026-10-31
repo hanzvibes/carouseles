@@ -116,7 +116,7 @@ export default function ProviderSettingsPage() {
     } finally { setBusyId(null); }
   }
 
-  async function useModel(id: string) {
+  async function saveSelectedModel(id: string) {
     const provider = providers.find((item) => item.id === id);
     const modelId = modelSelections[id];
     if (!provider || !modelId) return;
@@ -165,7 +165,7 @@ export default function ProviderSettingsPage() {
                 <div className="provider-card-top"><div className="provider-logo">{provider.providerType === "openai" ? "◎" : provider.providerType.slice(0, 1).toUpperCase()}</div><div className="provider-card-name"><b>{provider.name}</b><small>{provider.providerType} · {provider.role}</small></div>{provider.isDefault && <span className="default-tag">DEFAULT</span>}</div>
                 <div className="provider-model">{provider.modelId}</div>
                 <div className="provider-key"><span className="key-dot" /> API key saved ·••••••••</div>
-                {models[provider.id]?.length > 0 && <div className="provider-model-picker"><select aria-label="Choose model" value={modelSelections[provider.id] ?? ""} onChange={(event) => setModelSelections((current) => ({ ...current, [provider.id]: event.target.value }))}>{models[provider.id].map((model) => <option key={model} value={model}>{model}</option>)}</select><button onClick={() => void useModel(provider.id)} disabled={busyId === provider.id}>Use model</button></div>}
+                {models[provider.id]?.length > 0 && <div className="provider-model-picker"><select aria-label="Choose model" value={modelSelections[provider.id] ?? ""} onChange={(event) => setModelSelections((current) => ({ ...current, [provider.id]: event.target.value }))}>{models[provider.id].map((model) => <option key={model} value={model}>{model}</option>)}</select><button onClick={() => void saveSelectedModel(provider.id)} disabled={busyId === provider.id}>Use model</button></div>}
                 <div className="provider-card-actions"><button onClick={() => void testProvider(provider.id)} disabled={busyId === provider.id}>{busyId === provider.id ? "Testing…" : "Test connection"}</button><button onClick={() => startEdit(provider)}>Edit</button><button className="danger-action" onClick={() => void deleteProvider(provider.id)} disabled={busyId === provider.id}>Delete</button></div>
               </article>
             ))}</div>}
