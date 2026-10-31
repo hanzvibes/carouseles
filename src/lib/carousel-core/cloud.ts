@@ -1,4 +1,5 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { isDraftBasedOnCloud } from "@/lib/carousel-core/draft-storage";
 import {
   createEmptyCarouselDocument,
   validateCarouselDocument,
@@ -6,11 +7,30 @@ import {
 } from "@/lib/carousel-core/schema";
 
 type CloudDocumentRow = { id: string; document: unknown; updated_at: string };
+type CloudVersionRow = { id: string; updated_at: string };
 const ASSET_BUCKET = "carouseles-assets";
 const STORAGE_PREFIX = "storage://";
-const uploadedImageContent = new Map<string, string>();
+const uploadedImagePaths = new Map<string, string>();
+const cloudVersions = new Map<string, string | null>();
 
-export type CloudBootstrap = { user: User; projectId: string; document: CarouselDocument };
+export class CloudDraftConflictError extends Error {
+  constructor() {
+    super("This draft changed on another device. Your local copy is safe; reload the editor to compare versions.");
+    this.name = "CloudDraftConflictError";
+  }
+}
+
+function cloudVersionKey(userId: string, documentId: string) {
+  return `${userId}:${documentId}`;
+}
+
+function nextCloudUpdatedAt(previousUpdatedAt: string | null) {
+  const previousTime = previousUpdatedAt ? Date.parse(previousUpdatedAt) : 0;
+  const nextTime = Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : 0);
+  return new Date(nextTime).toISOString();
+}
+
+export type CloudBootstrap = { user: User; projectId: string; document: CarouselDocument; cloudUpdatedAt: string | null; localConflict: boolean };
 
 async function getOrCreateProject(supabase: SupabaseClient, userId: string) {
   const existing = await supabase.from("carouseles_projects").select("id")
@@ -61,10 +81,14 @@ async function uploadDocumentImages(
       if (blob.size === 0 || blob.size > 10 * 1024 * 1024) throw new Error("Image must be between 1 byte and 10 MB.");
       const mimeType = blob.type || "image/png";
       const extension = extensionForMime(mimeType);
-      const storagePath = `${userId}/${document.id}/${encodeURIComponent(element.id)}.${extension}`;
-      if (uploadedImageContent.get(storagePath) !== element.content) {
+      const cacheKey = `${userId}:${document.id}:${element.id}:${element.content}`;
+      let storagePath = uploadedImagePaths.get(cacheKey);
+      if (!storagePath) {
+        // Immutable asset paths prevent a stale save from replacing an image
+        // that is still referenced by the latest cloud document.
+        storagePath = `${userId}/${document.id}/${encodeURIComponent(element.id)}/${crypto.randomUUID()}.${extension}`;
         const upload = await supabase.storage.from(ASSET_BUCKET).upload(storagePath, blob, {
-          contentType: mimeType, upsert: true, cacheControl: "3600"
+          contentType: mimeType, upsert: false, cacheControl: "3600"
         });
         if (upload.error) throw upload.error;
 
@@ -77,7 +101,7 @@ async function uploadDocumentImages(
           file_size: blob.size
         }, { onConflict: "storage_path" });
         if (metadata.error) throw metadata.error;
-        uploadedImageContent.set(storagePath, element.content);
+        uploadedImagePaths.set(cacheKey, storagePath);
       }
       return { ...element, content: `${STORAGE_PREFIX}${storagePath}` };
     }))
@@ -110,17 +134,19 @@ async function saveDocument(
   userId: string,
   document: CarouselDocument
 ) {
+  const updatedAt = nextCloudUpdatedAt(null);
   const result = await supabase.from("carouseles_documents").upsert({
     id: document.id, project_id: projectId, user_id: userId,
     title: document.title, document, schema_version: document.schemaVersion,
-    updated_at: new Date().toISOString()
-  }, { onConflict: "id" });
+    updated_at: updatedAt
+  }, { onConflict: "id" }).select("updated_at").single<{ updated_at: string }>();
   if (result.error) throw result.error;
+  return result.data.updated_at;
 }
 
 export async function bootstrapCloudDocument(
   supabase: SupabaseClient,
-  localDocument: { document: CarouselDocument; savedAt: number | null } | null
+  localDocument: { document: CarouselDocument; savedAt: number | null; baseCloudUpdatedAt: string | null } | null
 ): Promise<CloudBootstrap> {
   const auth = await supabase.auth.getUser();
   if (auth.error) throw auth.error;
@@ -132,17 +158,23 @@ export async function bootstrapCloudDocument(
     const existing = await supabase.from("carouseles_documents").select("id, document, updated_at")
       .eq("id", localDocument.document.id).eq("user_id", user.id).maybeSingle<CloudDocumentRow>();
     if (existing.error) throw existing.error;
+    const versionKey = cloudVersionKey(user.id, localDocument.document.id);
     if (existing.data?.document) {
-      const cloudUpdatedAt = Date.parse(existing.data.updated_at);
-      if (Number.isFinite(cloudUpdatedAt) && localDocument.savedAt !== null && localDocument.savedAt > cloudUpdatedAt) {
-        await saveCloudDocument(supabase, projectId, user.id, localDocument.document);
-        return { user, projectId, document: localDocument.document };
+      cloudVersions.set(versionKey, existing.data.updated_at);
+      if (isDraftBasedOnCloud(localDocument, existing.data.updated_at)) {
+        const updatedAt = await saveCloudDocument(supabase, projectId, user.id, localDocument.document);
+        return { user, projectId, document: localDocument.document, cloudUpdatedAt: updatedAt, localConflict: false };
       }
       const parsed = validateCarouselDocument(existing.data.document);
-      return { user, projectId, document: await hydrateDocumentImages(supabase, parsed) };
+      // Compare equivalent representations: cloud images are storage:// references,
+      // while local drafts contain hydrated data URLs.
+      const cloudDocument = await hydrateDocumentImages(supabase, parsed);
+      const localConflict = JSON.stringify(localDocument.document) !== JSON.stringify(cloudDocument);
+      return { user, projectId, document: cloudDocument, cloudUpdatedAt: existing.data.updated_at, localConflict };
     }
-    await saveCloudDocument(supabase, projectId, user.id, localDocument.document);
-    return { user, projectId, document: localDocument.document };
+    cloudVersions.set(versionKey, null);
+    const updatedAt = await saveCloudDocument(supabase, projectId, user.id, localDocument.document);
+    return { user, projectId, document: localDocument.document, cloudUpdatedAt: updatedAt, localConflict: false };
   }
 
   const latest = await supabase.from("carouseles_documents").select("id, document, updated_at")
@@ -151,12 +183,14 @@ export async function bootstrapCloudDocument(
   if (latest.error) throw latest.error;
   if (latest.data?.document) {
     const parsed = validateCarouselDocument(latest.data.document);
-    return { user, projectId, document: await hydrateDocumentImages(supabase, parsed) };
+    cloudVersions.set(cloudVersionKey(user.id, latest.data.id), latest.data.updated_at);
+    return { user, projectId, document: await hydrateDocumentImages(supabase, parsed), cloudUpdatedAt: latest.data.updated_at, localConflict: false };
   }
 
   const document = createEmptyCarouselDocument();
-  await saveDocument(supabase, projectId, user.id, document);
-  return { user, projectId, document };
+  const updatedAt = await saveDocument(supabase, projectId, user.id, document);
+  cloudVersions.set(cloudVersionKey(user.id, document.id), updatedAt);
+  return { user, projectId, document, cloudUpdatedAt: updatedAt, localConflict: false };
 }
 
 export async function saveCloudDocument(
@@ -165,8 +199,52 @@ export async function saveCloudDocument(
   userId: string,
   document: CarouselDocument
 ) {
-  // Create the owning document first because asset metadata has a document FK.
-  await saveDocument(supabase, projectId, userId, document);
+  const versionKey = cloudVersionKey(userId, document.id);
+  if (!cloudVersions.has(versionKey)) {
+    throw new Error("Cloud version is not initialized. Reload the editor before saving.");
+  }
+
+  const expectedUpdatedAt = cloudVersions.get(versionKey) ?? null;
+  const existing = await supabase.from("carouseles_documents").select("id, updated_at")
+    .eq("id", document.id).eq("user_id", userId).maybeSingle<CloudVersionRow>();
+  if (existing.error) throw existing.error;
+
+  if (existing.data) {
+    if (expectedUpdatedAt === null || !isDraftBasedOnCloud(
+      { document, savedAt: null, baseCloudUpdatedAt: expectedUpdatedAt },
+      existing.data.updated_at
+    )) {
+      throw new CloudDraftConflictError();
+    }
+  } else if (expectedUpdatedAt !== null) {
+    throw new CloudDraftConflictError();
+  }
+
+  // Ensure the owning row exists before inserting asset metadata.
+  let expectedForUpdate = existing.data?.updated_at ?? null;
+  if (!existing.data) {
+    expectedForUpdate = nextCloudUpdatedAt(null);
+    const created = await supabase.from("carouseles_documents").insert({
+      id: document.id, project_id: projectId, user_id: userId,
+      title: document.title, document, schema_version: document.schemaVersion,
+      updated_at: expectedForUpdate
+    });
+    if (created.error) {
+      if (created.error.code === "23505") throw new CloudDraftConflictError();
+      throw created.error;
+    }
+  }
+
   const cloudDocument = await uploadDocumentImages(supabase, userId, document);
-  await saveDocument(supabase, projectId, userId, cloudDocument);
+  const updatedAt = nextCloudUpdatedAt(expectedForUpdate);
+  const saved = await supabase.from("carouseles_documents").update({
+    project_id: projectId, title: cloudDocument.title, document: cloudDocument,
+    schema_version: cloudDocument.schemaVersion, updated_at: updatedAt
+  }).eq("id", document.id).eq("user_id", userId).eq("updated_at", expectedForUpdate)
+    .select("updated_at").maybeSingle<{ updated_at: string }>();
+  if (saved.error) throw saved.error;
+  if (!saved.data?.updated_at) throw new CloudDraftConflictError();
+
+  cloudVersions.set(versionKey, saved.data.updated_at);
+  return saved.data.updated_at;
 }
