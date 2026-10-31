@@ -5,7 +5,7 @@ import {
   type CarouselDocument
 } from "@/lib/carousel-core/schema";
 
-type CloudDocumentRow = { id: string; document: unknown };
+type CloudDocumentRow = { id: string; document: unknown; updated_at: string };
 const ASSET_BUCKET = "carouseles-assets";
 const STORAGE_PREFIX = "storage://";
 const uploadedImageContent = new Map<string, string>();
@@ -120,7 +120,7 @@ async function saveDocument(
 
 export async function bootstrapCloudDocument(
   supabase: SupabaseClient,
-  localDocument: CarouselDocument | null
+  localDocument: { document: CarouselDocument; savedAt: number | null } | null
 ): Promise<CloudBootstrap> {
   const auth = await supabase.auth.getUser();
   if (auth.error) throw auth.error;
@@ -129,10 +129,15 @@ export async function bootstrapCloudDocument(
   const projectId = await getOrCreateProject(supabase, user.id);
 
   if (localDocument) {
-    const existing = await supabase.from("carouseles_documents").select("id, document")
-      .eq("id", localDocument.id).eq("user_id", user.id).maybeSingle<CloudDocumentRow>();
+    const existing = await supabase.from("carouseles_documents").select("id, document, updated_at")
+      .eq("id", localDocument.document.id).eq("user_id", user.id).maybeSingle<CloudDocumentRow>();
     if (existing.error) throw existing.error;
     if (existing.data?.document) {
+      const cloudUpdatedAt = Date.parse(existing.data.updated_at);
+      if (Number.isFinite(cloudUpdatedAt) && localDocument.savedAt !== null && localDocument.savedAt > cloudUpdatedAt) {
+        await saveCloudDocument(supabase, projectId, user.id, localDocument.document);
+        return { user, projectId, document: localDocument.document };
+      }
       const parsed = validateCarouselDocument(existing.data.document);
       return { user, projectId, document: await hydrateDocumentImages(supabase, parsed) };
     }
