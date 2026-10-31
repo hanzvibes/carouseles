@@ -29,6 +29,9 @@ export function createLatestSaveQueue<T>(
             break;
           } catch (error) {
             lastError = error;
+            // A version conflict is not transient: retrying the same stale
+            // snapshot cannot succeed and only delays the user's recovery.
+            if (error instanceof Error && error.name === "CloudDraftConflictError") break;
             const isLastAttempt = attempt === retryDelaysMs.length;
             if (isLastAttempt || hasPendingSnapshot) break;
 
