@@ -91,10 +91,14 @@ async function hydrateDocumentImages(supabase: SupabaseClient, document: Carouse
     elements: await Promise.all(page.elements.map(async (element) => {
       if (element.type !== "image" || !element.content.startsWith(STORAGE_PREFIX)) return element;
       const path = element.content.slice(STORAGE_PREFIX.length);
-      const { data, error } = await supabase.storage.from(ASSET_BUCKET).download(path);
-      if (error) throw error;
-      if (!data) throw new Error("Cloud image was not found.");
-      return { ...element, content: await blobToDataUrl(data) };
+      try {
+        const { data, error } = await supabase.storage.from(ASSET_BUCKET).download(path);
+        if (error || !data) throw error ?? new Error("Cloud image was not found.");
+        return { ...element, content: await blobToDataUrl(data) };
+      } catch {
+        // Keep the rest of the document editable if an individual asset is missing.
+        return { ...element, content: "data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%271080%27 height=%27620%27%3E%3Crect width=%27100%25%27 height=%27100%25%27 fill=%27%23eeeeee%27/%3E%3C/svg%3E" };
+      }
     }))
   })));
   return { ...document, pages };
