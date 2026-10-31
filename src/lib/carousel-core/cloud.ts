@@ -7,9 +7,28 @@ import {
 } from "@/lib/carousel-core/schema";
 
 type CloudDocumentRow = { id: string; document: unknown; updated_at: string };
+type CloudVersionRow = { id: string; updated_at: string };
 const ASSET_BUCKET = "carouseles-assets";
 const STORAGE_PREFIX = "storage://";
 const uploadedImageContent = new Map<string, string>();
+const cloudVersions = new Map<string, string | null>();
+
+export class CloudDraftConflictError extends Error {
+  constructor() {
+    super("This draft changed on another device. Your local copy is safe; reload the editor to compare versions.");
+    this.name = "CloudDraftConflictError";
+  }
+}
+
+function cloudVersionKey(userId: string, documentId: string) {
+  return `${userId}:${documentId}`;
+}
+
+function nextCloudUpdatedAt(previousUpdatedAt: string | null) {
+  const previousTime = previousUpdatedAt ? Date.parse(previousUpdatedAt) : 0;
+  const nextTime = Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : 0);
+  return new Date(nextTime).toISOString();
+}
 
 export type CloudBootstrap = { user: User; projectId: string; document: CarouselDocument; cloudUpdatedAt: string | null; localConflict: boolean };
 
@@ -111,7 +130,7 @@ async function saveDocument(
   userId: string,
   document: CarouselDocument
 ) {
-  const updatedAt = new Date().toISOString();
+  const updatedAt = nextCloudUpdatedAt(null);
   const result = await supabase.from("carouseles_documents").upsert({
     id: document.id, project_id: projectId, user_id: userId,
     title: document.title, document, schema_version: document.schemaVersion,
@@ -135,7 +154,9 @@ export async function bootstrapCloudDocument(
     const existing = await supabase.from("carouseles_documents").select("id, document, updated_at")
       .eq("id", localDocument.document.id).eq("user_id", user.id).maybeSingle<CloudDocumentRow>();
     if (existing.error) throw existing.error;
+    const versionKey = cloudVersionKey(user.id, localDocument.document.id);
     if (existing.data?.document) {
+      cloudVersions.set(versionKey, existing.data.updated_at);
       if (isDraftBasedOnCloud(localDocument, existing.data.updated_at)) {
         const updatedAt = await saveCloudDocument(supabase, projectId, user.id, localDocument.document);
         return { user, projectId, document: localDocument.document, cloudUpdatedAt: updatedAt, localConflict: false };
@@ -147,6 +168,7 @@ export async function bootstrapCloudDocument(
       const localConflict = JSON.stringify(localDocument.document) !== JSON.stringify(cloudDocument);
       return { user, projectId, document: cloudDocument, cloudUpdatedAt: existing.data.updated_at, localConflict };
     }
+    cloudVersions.set(versionKey, null);
     const updatedAt = await saveCloudDocument(supabase, projectId, user.id, localDocument.document);
     return { user, projectId, document: localDocument.document, cloudUpdatedAt: updatedAt, localConflict: false };
   }
@@ -157,11 +179,13 @@ export async function bootstrapCloudDocument(
   if (latest.error) throw latest.error;
   if (latest.data?.document) {
     const parsed = validateCarouselDocument(latest.data.document);
+    cloudVersions.set(cloudVersionKey(user.id, latest.data.id), latest.data.updated_at);
     return { user, projectId, document: await hydrateDocumentImages(supabase, parsed), cloudUpdatedAt: latest.data.updated_at, localConflict: false };
   }
 
   const document = createEmptyCarouselDocument();
   const updatedAt = await saveDocument(supabase, projectId, user.id, document);
+  cloudVersions.set(cloudVersionKey(user.id, document.id), updatedAt);
   return { user, projectId, document, cloudUpdatedAt: updatedAt, localConflict: false };
 }
 
@@ -171,8 +195,52 @@ export async function saveCloudDocument(
   userId: string,
   document: CarouselDocument
 ) {
-  // Create the owning document first because asset metadata has a document FK.
-  await saveDocument(supabase, projectId, userId, document);
+  const versionKey = cloudVersionKey(userId, document.id);
+  if (!cloudVersions.has(versionKey)) {
+    throw new Error("Cloud version is not initialized. Reload the editor before saving.");
+  }
+
+  const expectedUpdatedAt = cloudVersions.get(versionKey) ?? null;
+  const existing = await supabase.from("carouseles_documents").select("id, updated_at")
+    .eq("id", document.id).eq("user_id", userId).maybeSingle<CloudVersionRow>();
+  if (existing.error) throw existing.error;
+
+  if (existing.data) {
+    if (expectedUpdatedAt === null || !isDraftBasedOnCloud(
+      { document, savedAt: null, baseCloudUpdatedAt: expectedUpdatedAt },
+      existing.data.updated_at
+    )) {
+      throw new CloudDraftConflictError();
+    }
+  } else if (expectedUpdatedAt !== null) {
+    throw new CloudDraftConflictError();
+  }
+
+  // Ensure the owning row exists before inserting asset metadata.
+  let expectedForUpdate = existing.data?.updated_at ?? null;
+  if (!existing.data) {
+    expectedForUpdate = nextCloudUpdatedAt(null);
+    const created = await supabase.from("carouseles_documents").insert({
+      id: document.id, project_id: projectId, user_id: userId,
+      title: document.title, document, schema_version: document.schemaVersion,
+      updated_at: expectedForUpdate
+    });
+    if (created.error) {
+      if (created.error.code === "23505") throw new CloudDraftConflictError();
+      throw created.error;
+    }
+  }
+
   const cloudDocument = await uploadDocumentImages(supabase, userId, document);
-  return saveDocument(supabase, projectId, userId, cloudDocument);
+  const updatedAt = nextCloudUpdatedAt(expectedForUpdate);
+  const saved = await supabase.from("carouseles_documents").update({
+    project_id: projectId, title: cloudDocument.title, document: cloudDocument,
+    schema_version: cloudDocument.schemaVersion, updated_at: updatedAt
+  }).eq("id", document.id).eq("user_id", userId).eq("updated_at", expectedForUpdate)
+    .select("updated_at").maybeSingle<{ updated_at: string }>();
+  if (saved.error) throw saved.error;
+  if (!saved.data?.updated_at) throw new CloudDraftConflictError();
+
+  cloudVersions.set(versionKey, saved.data.updated_at);
+  return saved.data.updated_at;
 }
