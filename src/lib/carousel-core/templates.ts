@@ -1,5 +1,5 @@
 import type { CarouselDocument, CarouselElement } from "./schema";
-import { validateCarouselDocument } from "@/lib/carousel-core/schema";
+import { validateCarouselDocument } from "./schema";
 import { z } from "zod";
 
 export const brandKitSchema = z.object({
