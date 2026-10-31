@@ -42,6 +42,7 @@ export default function EditorPage() {
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [cloudUserId, setCloudUserId] = useState<string | null>(null);
+  const [draftStorageKey, setDraftStorageKey] = useState(ANONYMOUS_STORAGE_KEY);
   const [cloudProjectId, setCloudProjectId] = useState<string | null>(null);
   const [cloudStatus, setCloudStatus] = useState("Local draft");
   const [cloudError, setCloudError] = useState("");
@@ -91,6 +92,7 @@ export default function EditorPage() {
         const userId = auth.data.user.id;
         authenticatedUserId = userId;
         setCloudUserId(userId);
+        setDraftStorageKey(userStorageKey(userId));
         const localDocument = readLocalDraft(userStorageKey(userId));
         const bootstrap = await bootstrapCloudDocument(supabase, localDocument);
         if (cancelled) return;
@@ -110,7 +112,7 @@ export default function EditorPage() {
           setDocument(localDocument);
           setActivePageId(localDocument.pages[0].id);
         }
-        setCloudStatus("Local draft · sign in to sync");
+        setCloudStatus(authenticatedUserId ? "Cloud unavailable · user draft kept" : "Local draft · sign in to sync");
         setCloudError(error instanceof Error ? error.message : "Cloud connection failed");
       } finally {
         if (!cancelled) setReady(true);
@@ -125,8 +127,7 @@ export default function EditorPage() {
     if (!ready) return;
     const timeout = window.setTimeout(() => {
       try {
-        const storageKey = cloudUserId ? userStorageKey(cloudUserId) : ANONYMOUS_STORAGE_KEY;
-        window.localStorage.setItem(storageKey, JSON.stringify(document));
+        window.localStorage.setItem(draftStorageKey, JSON.stringify(document));
         setSavedAt(new Date());
         setSaveError(false);
       } catch {
@@ -134,7 +135,7 @@ export default function EditorPage() {
       }
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [document, ready, cloudUserId]);
+  }, [document, ready, draftStorageKey]);
 
   useEffect(() => {
     if (!ready || !cloudUserId || !cloudProjectId) return;
