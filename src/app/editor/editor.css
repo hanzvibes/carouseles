@@ -5,3 +5,5 @@
 .canvas-element:active{cursor:grabbing}
 .canvas-image{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none}
 .selection-corner{right:-4px;bottom:-4px;width:12px;height:12px;border:2px solid #fff;border-radius:3px;background:#705be7;cursor:nwse-resize;touch-action:none;z-index:2}
+
+@media(max-width:480px){.editor-top-actions{gap:5px}.editor-top-actions .editor-export{padding:6px 7px;font-size:8px}.document-title{width:96px}}
