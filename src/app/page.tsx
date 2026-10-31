@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { applyBrandKit, brandKitSchema, carouselTemplates, createTemplateDocument, type BrandKit, type TemplateId } from "@/lib/carousel-core/templates";
 
 const projects = [
   { title: "The quiet power of consistency", category: "CREATOR EDUCATION", slides: 7, tone: "violet", date: "Just now" },
   { title: "Build systems, not habits", category: "PERSONAL BRAND", slides: 6, tone: "orange", date: "Yesterday" },
   { title: "A better way to plan your week", category: "PRODUCTIVITY", slides: 8, tone: "blue", date: "2 days ago" }
 ];
+const BRAND_KIT_KEY = "carouseles:brand-kit";
+const defaultBrandKit: BrandKit = { name: "My brand", colors: ["#20201f", "#f3efe7", "#b56d4b"], fontFamily: "Manrope" };
 
 export default function Home() {
   const [prompt, setPrompt] = useState("");
@@ -17,7 +20,18 @@ export default function Home() {
   const [audience, setAudience] = useState("");
   const [notice, setNotice] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [brandKit, setBrandKit] = useState<BrandKit>(defaultBrandKit);
+  const [kitNotice, setKitNotice] = useState("");
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(BRAND_KIT_KEY);
+      if (saved) setBrandKit(brandKitSchema.parse(JSON.parse(saved)));
+    } catch {
+      window.localStorage.removeItem(BRAND_KIT_KEY);
+    }
+  }, []);
 
   async function generateCarousel() {
     if (prompt.trim().length < 8) { setNotice("Add a little more detail to your idea (at least 8 characters)."); return; }
@@ -48,6 +62,30 @@ export default function Home() {
     }
   }
 
+  function startFromTemplate(templateId: TemplateId) {
+    try {
+      let document = createTemplateDocument(templateId);
+      const savedKit = window.localStorage.getItem(BRAND_KIT_KEY);
+      if (savedKit) document = applyBrandKit(document, brandKitSchema.parse(JSON.parse(savedKit)));
+      window.localStorage.setItem("carouseles:generated-document", JSON.stringify(document));
+      window.location.href = "/editor";
+    } catch {
+      setNotice("Template could not be opened. Please try again.");
+    }
+  }
+
+  function saveBrandKit() {
+    const parsed = brandKitSchema.safeParse(brandKit);
+    if (!parsed.success) { setKitNotice("Check the brand name and colors."); return; }
+    try {
+      window.localStorage.setItem(BRAND_KIT_KEY, JSON.stringify(parsed.data));
+      setBrandKit(parsed.data);
+      setKitNotice("Brand kit saved on this device.");
+    } catch {
+      setKitNotice("Could not save the brand kit in this browser.");
+    }
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -57,8 +95,8 @@ export default function Home() {
         <nav className="nav-list" aria-label="Main navigation">
           <a className="nav-item active" href="#"><span>▦</span> Overview</a>
           <a className="nav-item" href="#projects"><span>▤</span> My projects</a>
-          <span className="nav-item"><span>▧</span> Templates <span className="nav-soon">SOON</span></span>
-          <span className="nav-item"><span>◈</span> Brand kit <span className="nav-soon">SOON</span></span>
+          <a className="nav-item" href="#templates"><span>▧</span> Templates</a>
+          <a className="nav-item" href="#brand-kit"><span>◈</span> Brand kit</a>
         </nav>
         <div className="sidebar-bottom">
           <div className="usage-card"><div className="usage-top"><span>AI generations</span><b>—</b></div><div className="usage-track"><i /></div><small>Uses your connected AI provider</small></div>
@@ -80,12 +118,38 @@ export default function Home() {
             <div className="prompt-footer"><span>✧ Generated slides are fully editable</span><button className="generate-button" onClick={generateCarousel} disabled={generating}>{generating ? <><span className="generation-spinner"/> Creating slides…</> : <>Generate carousel <span>↗</span></>}</button></div>
             {notice && <p className="notice" role="status">{notice}</p>}
           </section>
+
+          <section className="templates-section" id="templates">
+            <div className="section-heading"><div><div className="eyebrow">START WITH A STRUCTURE</div><h2>Starter templates</h2></div><span className="section-subtitle">Pick one to open the editor</span></div>
+            <div className="template-grid">
+              {carouselTemplates.map((template) => <article className="template-card" key={template.id}>
+                <button className="template-preview-button" onClick={() => startFromTemplate(template.id)} aria-label={`Use ${template.name} template`}>
+                  <div className={`template-preview template-${template.id}`} style={{ background: template.colors[1], color: template.colors[0] }}>
+                    <span className="template-kicker">CAROUSELES / 01</span><strong>{template.id === "editorial" ? "Ideas worth sharing." : template.id === "bold" ? "MAKE IT COUNT." : "Less, but better."}</strong><i style={{ background: template.colors[2] }}/><small>One thought. One clear message.</small>
+                  </div>
+                  <span className="template-use">Use template ↗</span>
+                </button>
+                <div className="template-meta"><b>{template.name}</b><span>{template.description}</span></div>
+              </article>)}
+            </div>
+          </section>
+
+          <section className="brand-kit-card" id="brand-kit">
+            <div className="brand-kit-intro"><div className="eyebrow">YOUR VISUAL IDENTITY</div><h2>Brand kit</h2><p>Save your colors and typeface. Apply them to any starter template.</p></div>
+            <div className="brand-kit-fields">
+              <label>BRAND NAME<input value={brandKit.name} maxLength={40} onChange={event => setBrandKit(current => ({ ...current, name: event.target.value }))}/></label>
+              <label>FONT<select value={brandKit.fontFamily} onChange={event => setBrandKit(current => ({ ...current, fontFamily: event.target.value as BrandKit["fontFamily"] }))}><option>Manrope</option><option>Inter</option><option>DM Sans</option><option>Georgia</option></select></label>
+              <div className="brand-colors">{brandKit.colors.map((color, index) => <label key={index}>COLOR {index + 1}<span className="brand-color-control"><input type="color" value={color} onChange={event => setBrandKit(current => ({ ...current, colors: current.colors.map((item, itemIndex) => itemIndex === index ? event.target.value : item) as BrandKit["colors"] }))}/><code>{color.toUpperCase()}</code></span></label>)}</div>
+            </div>
+            <div className="brand-kit-footer"><div className="brand-swatch-preview">{brandKit.colors.map(color => <i key={color} style={{ background: color }}/>)}</div><span className="brand-kit-note">{kitNotice || "Stored locally in this browser for now."}</span><button className="generate-button" onClick={saveBrandKit}>Save brand kit</button></div>
+          </section>
+
           <section className="projects-section" id="projects">
             <div className="section-heading"><div><div className="eyebrow">YOUR CANVAS</div><h2>Recent projects</h2></div><Link href="/editor">Open editor <span>↗</span></Link></div>
             <div className="filter-row"><button className="filter active-filter">All projects</button><button className="filter">My drafts</button></div>
             <div className="project-grid">{projects.map((project, index) => <article className="project-card" key={project.title}><div className={`project-preview ${project.tone}`}><div className="preview-top"><span>CAROUSELES / 0{index + 1}</span><span>↗</span></div><div className="preview-copy"><small>{project.category}</small><strong>{project.title}</strong><span className="preview-lines">━━━━━━━━━━━━<br/>━━━━━━━━</span></div><div className="preview-bottom"><span>01 — 0{project.slides}</span><span>✳</span></div></div><div className="project-meta"><div><b>{project.title}</b><small>{project.date} · {project.slides} slides</small></div><button aria-label={`More options for ${project.title}`}>···</button></div></article>)}</div>
           </section>
-          <footer className="footer-note"><span>CAROUSELES</span><span>One idea. Multiple slides. Infinite possibilities.</span><span>v0.3.0</span></footer>
+          <footer className="footer-note"><span>CAROUSELES</span><span>One idea. Multiple slides. Infinite possibilities.</span><span>v0.4.0</span></footer>
         </div>
       </section>
     </main>
