@@ -41,7 +41,7 @@ Animated video export, social scheduling, multiplayer editing, arbitrary code ex
 
 ## Development status
 
-This repository includes an initial dashboard, a browser-based multi-slide editor, draggable/resizable elements, image upload and replacement, local draft persistence, PNG export for the active slide, and Carousel Core schema validation. Supabase email magic-link sign-in and cloud document sync are implemented behind environment configuration. AI generation, durable Storage-backed image assets, PDF export, and production deployment are not implemented yet.
+This repository includes an initial dashboard, a browser-based multi-slide editor, draggable/resizable elements, image upload and replacement, local draft persistence, PNG export for the active slide, and Carousel Core schema validation. Supabase email magic-link sign-in and cloud document sync are implemented behind environment configuration. AI generation, PDF export, and production deployment are not implemented yet. Uploaded images sync to the private `carouseles-assets` Supabase Storage bucket; document JSON stores user-scoped asset paths rather than image Base64.
 
 ## Documentation
 
