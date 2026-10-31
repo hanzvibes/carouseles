@@ -6,3 +6,38 @@
 @media(max-width:640px){.top-actions .nav-item{display:flex}}
 .generation-options{display:grid;grid-template-columns:125px 170px minmax(180px,1fr);gap:10px;margin-top:12px}.generation-options label{display:grid;gap:6px;font-size:8px;letter-spacing:.8px;color:#96958f;font-weight:700}.generation-options select,.generation-options input{width:100%;height:34px;border:1px solid #ecece9;border-radius:7px;background:#fff;padding:0 9px;color:#454540;font:10px 'DM Sans';outline:none}.generation-options select:focus,.generation-options input:focus{border-color:#b8b0f5;box-shadow:0 0 0 3px #6958e812}.generate-button:disabled{opacity:.7;cursor:wait;transform:none}.generation-spinner{display:inline-block;width:11px;height:11px;border:2px solid #ffffff66;border-top-color:#fff;border-radius:50%;animation:carousel-spin .7s linear infinite;margin-right:7px;vertical-align:-2px}.generation-options+.prompt-footer{padding-top:14px}@keyframes carousel-spin{to{transform:rotate(360deg)}}
 @media(max-width:640px){.generation-options{grid-template-columns:1fr 1fr}.audience-field{grid-column:1/-1}.prompt-footer{align-items:flex-start;gap:12px}.prompt-footer>span{max-width:130px;line-height:1.5}.generate-button{white-space:nowrap}}
+
+
+/* Starter templates and local brand kit */
+.templates-section{margin-top:38px}
+.section-subtitle{font-size:10px;color:#999}
+.template-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:17px}
+.template-card{min-width:0}
+.template-preview-button{display:block;width:100%;padding:0;border:0;background:transparent;text-align:left;cursor:pointer}
+.template-preview{aspect-ratio:4/4.3;border:1px solid #e8e8e4;border-radius:10px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;transition:transform .18s,box-shadow .18s}
+.template-preview-button:hover .template-preview{transform:translateY(-3px);box-shadow:0 10px 24px #17171712}
+.template-kicker{font-size:7px;letter-spacing:1.1px;opacity:.65}
+.template-preview strong{font:800 clamp(18px,2.2vw,27px)/1.04 Manrope;letter-spacing:-1px;max-width:230px}
+.template-preview i{width:48px;height:5px;border-radius:9px}
+.template-preview small{font-size:9px;opacity:.7}
+.template-use{display:block;margin-top:8px;font-size:9px;color:#6251d4;font-weight:700}
+.template-meta{display:grid;gap:4px;padding:9px 1px}
+.template-meta b{font-size:11px}
+.template-meta span{font-size:9px;line-height:1.5;color:#92928d}
+.brand-kit-card{margin-top:26px;padding:20px;background:#fff;border:1px solid var(--line);border-radius:12px;display:grid;grid-template-columns:minmax(160px,.75fr) minmax(0,1.5fr);gap:20px}
+.brand-kit-intro h2{font:800 20px Manrope;letter-spacing:-.7px;margin:7px 0}
+.brand-kit-intro p{font-size:10px;line-height:1.6;color:#888;max-width:210px;margin:0}
+.brand-kit-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.brand-kit-fields>label,.brand-colors>label{display:grid;gap:6px;font-size:8px;letter-spacing:.8px;font-weight:700;color:#96958f}
+.brand-kit-fields input:not([type=color]),.brand-kit-fields select{width:100%;height:34px;border:1px solid #ecece9;border-radius:7px;background:#fff;padding:0 9px;color:#454540;font:10px 'DM Sans';outline:none}
+.brand-colors{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.brand-color-control{height:34px;border:1px solid #ecece9;border-radius:7px;padding:4px 7px;display:flex;align-items:center;gap:7px}
+.brand-color-control input{width:23px;height:23px;padding:0;border:0;background:none;cursor:pointer}
+.brand-color-control code{font:9px 'DM Sans';color:#666}
+.brand-kit-footer{grid-column:1/-1;border-top:1px solid #eee;padding-top:13px;display:flex;align-items:center;gap:10px}
+.brand-swatch-preview{display:flex}
+.brand-swatch-preview i{width:18px;height:18px;border:2px solid white;border-radius:50%;margin-left:-4px}
+.brand-swatch-preview i:first-child{margin-left:0}
+.brand-kit-note{font-size:9px;color:#999;flex:1}
+@media(max-width:900px){.brand-kit-card{grid-template-columns:1fr}.brand-kit-intro p{max-width:420px}}
+@media(max-width:640px){.template-grid{grid-template-columns:1fr 1fr;gap:12px}.template-preview{padding:11px;aspect-ratio:4/4.5}.template-preview strong{font-size:19px}.section-subtitle{display:none}.brand-kit-card{padding:15px}.brand-kit-fields{grid-template-columns:1fr 1fr}.brand-kit-footer{flex-wrap:wrap}.brand-kit-note{min-width:55%;line-height:1.4}.brand-kit-footer .generate-button{margin-left:auto}}
