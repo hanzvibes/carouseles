@@ -161,6 +161,8 @@ export default function EditorPage() {
               setCloudStatus("Cloud save failed · local draft kept");
               setCloudError(error instanceof Error ? error.message : "Cloud save failed");
             }
+            // Let the queue know this attempt failed so its bounded retry policy runs.
+            throw error;
           }
         })
       };
