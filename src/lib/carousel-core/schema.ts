@@ -38,7 +38,7 @@ export const carouselDocumentSchema = z.object({
     name: z.string().default("Custom"),
     colors: z.array(z.string()).default(["#111111", "#ffffff", "#6d5dfc"]),
     fontFamily: z.string().default("Inter")
-  }).default({}),
+  }).default({ name: "Custom", colors: ["#111111", "#ffffff", "#6d5dfc"], fontFamily: "Inter" }),
   pages: z.array(carouselPageSchema).min(1)
 });
 
