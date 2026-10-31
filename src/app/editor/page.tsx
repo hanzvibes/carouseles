@@ -120,7 +120,8 @@ export default function EditorPage() {
     if (!ready) return;
     const timeout = window.setTimeout(() => {
       try {
-        const storageKey = cloudUserId ? userStorageKey(cloudUserId) : ANONYMOUS_STORAGE_KEY;\n        window.localStorage.setItem(storageKey, JSON.stringify(document));
+        const storageKey = cloudUserId ? userStorageKey(cloudUserId) : ANONYMOUS_STORAGE_KEY;
+        window.localStorage.setItem(storageKey, JSON.stringify(document));
         setSavedAt(new Date());
         setSaveError(false);
       } catch {
@@ -128,7 +129,7 @@ export default function EditorPage() {
       }
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [document, ready]);
+  }, [document, ready, cloudUserId]);
 
   useEffect(() => {
     if (!ready || !cloudUserId || !cloudProjectId) return;
