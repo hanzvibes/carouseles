@@ -7,7 +7,7 @@ import { applySlideTextEdits } from "@/lib/carousel-core/ai-editing";
 import { renderCarouselPage, safeExportName } from "@/lib/carousel-core/export";
 import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
 import { createLatestSaveQueue, type LatestSaveQueue } from "@/lib/carousel-core/latest-save-queue";
-import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey } from "@/lib/carousel-core/draft-storage";
+import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey, parseLocalDraft, serializeLocalDraft } from "@/lib/carousel-core/draft-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createEmptyCarouselDocument,
@@ -17,14 +17,10 @@ import {
 } from "@/lib/carousel-core/schema";
 
 
-function readLocalDraft(storageKey: string, legacyFallback = false): CarouselDocument | null {
-  try {
-    const raw = window.localStorage.getItem(storageKey)
-      ?? (legacyFallback ? window.localStorage.getItem(LEGACY_DRAFT_STORAGE_KEY) : null);
-    return raw ? validateCarouselDocument(JSON.parse(raw)) : null;
-  } catch {
-    return null;
-  }
+function readLocalDraft(storageKey: string, legacyFallback = false) {
+  const raw = window.localStorage.getItem(storageKey)
+    ?? (legacyFallback ? window.localStorage.getItem(LEGACY_DRAFT_STORAGE_KEY) : null);
+  return parseLocalDraft(raw, validateCarouselDocument);
 }
 
 function makeId() {
@@ -60,8 +56,8 @@ export default function EditorPage() {
       if (!supabase) {
         const localDocument = readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
         if (!cancelled && localDocument) {
-          setDocument(localDocument);
-          setActivePageId(localDocument.pages[0].id);
+          setDocument(localDocument.document);
+          setActivePageId(localDocument.document.pages[0].id);
         }
         if (!cancelled) {
           setCloudStatus("Local only · configure Supabase");
@@ -78,8 +74,8 @@ export default function EditorPage() {
           // Never upload an anonymous draft into a signed-in account.
           const localDocument = readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
           if (!cancelled && localDocument) {
-            setDocument(localDocument);
-            setActivePageId(localDocument.pages[0].id);
+            setDocument(localDocument.document);
+            setActivePageId(localDocument.document.pages[0].id);
           }
           if (!cancelled) {
             setCloudStatus("Local draft · sign in to sync");
@@ -109,8 +105,8 @@ export default function EditorPage() {
           ? readLocalDraft(getDraftStorageKey(authenticatedUserId), canReadLegacyDraft(authenticatedUserId))
           : readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
         if (localDocument) {
-          setDocument(localDocument);
-          setActivePageId(localDocument.pages[0].id);
+          setDocument(localDocument.document);
+          setActivePageId(localDocument.document.pages[0].id);
         }
         setCloudStatus(authenticatedUserId ? "Cloud unavailable · user draft kept" : "Local draft · sign in to sync");
         setCloudError(error instanceof Error ? error.message : "Cloud connection failed");
@@ -125,16 +121,13 @@ export default function EditorPage() {
 
   useEffect(() => {
     if (!ready) return;
-    const timeout = window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(draftStorageKey, JSON.stringify(document));
-        setSavedAt(new Date());
-        setSaveError(false);
-      } catch {
-        setSaveError(true);
-      }
-    }, 350);
-    return () => window.clearTimeout(timeout);
+    try {
+      window.localStorage.setItem(draftStorageKey, serializeLocalDraft(document));
+      setSavedAt(new Date());
+      setSaveError(false);
+    } catch {
+      setSaveError(true);
+    }
   }, [document, ready, draftStorageKey]);
 
   useEffect(() => {
