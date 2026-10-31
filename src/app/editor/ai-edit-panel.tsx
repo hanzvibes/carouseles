@@ -39,7 +39,7 @@ export default function AiEditPanel({ elements, onApply }: Props) {
       const payload = await response.json() as { edits?: SlideTextEdit[]; error?: string };
       if (!response.ok || !payload.edits) throw new Error(payload.error ?? "AI gagal mengedit slide.");
       onApply(payload.edits);
-      setMessage("Perubahan diterapkan. Bisa langsung undo dengan mengedit teks kembali.");
+      setMessage("Teks slide aktif berhasil diperbarui.");
       setInstruction("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "AI editing gagal.");
