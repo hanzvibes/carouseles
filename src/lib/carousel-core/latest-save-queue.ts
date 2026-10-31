@@ -4,7 +4,8 @@ export type LatestSaveQueue<T> = {
 
 export function createLatestSaveQueue<T>(
   save: (snapshot: T) => Promise<void>,
-  onError: (error: unknown) => void = () => undefined
+  onError: (error: unknown) => void = () => undefined,
+  retryDelaysMs: number[] = [500, 1500]
 ): LatestSaveQueue<T> {
   let pendingSnapshot = undefined as T;
   let hasPendingSnapshot = false;
@@ -18,12 +19,28 @@ export function createLatestSaveQueue<T>(
       while (hasPendingSnapshot) {
         const snapshot = pendingSnapshot;
         hasPendingSnapshot = false;
+        let saved = false;
+        let lastError: unknown;
 
-        try {
-          await save(snapshot);
-        } catch (error) {
-          onError(error);
+        for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+          try {
+            await save(snapshot);
+            saved = true;
+            break;
+          } catch (error) {
+            lastError = error;
+            const isLastAttempt = attempt === retryDelaysMs.length;
+            if (isLastAttempt || hasPendingSnapshot) break;
+
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, retryDelaysMs[attempt]);
+            });
+            // A newer snapshot makes retrying this stale version unnecessary.
+            if (hasPendingSnapshot) break;
+          }
         }
+
+        if (!saved && !hasPendingSnapshot) onError(lastError);
       }
     } finally {
       isSaving = false;
