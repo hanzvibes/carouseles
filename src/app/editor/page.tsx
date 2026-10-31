@@ -4,6 +4,7 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import AiEditPanel from "./ai-edit-panel";
 import { applySlideTextEdits } from "@/lib/carousel-core/ai-editing";
+import { renderCarouselPage, safeExportName } from "@/lib/carousel-core/export";
 import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
 import { createLatestSaveQueue, type LatestSaveQueue } from "@/lib/carousel-core/latest-save-queue";
 import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey } from "@/lib/carousel-core/draft-storage";
@@ -332,68 +333,84 @@ export default function EditorPage() {
   async function exportPng() {
     if (!activePage) return;
     setExportStatus("Preparing PNG…");
-    const canvas = window.document.createElement("canvas");
-    canvas.width = document.width;
-    canvas.height = document.height;
-    const context = canvas.getContext("2d");
-    if (!context) { setExportStatus("PNG export is unavailable in this browser."); return; }
-    context.fillStyle = activePage.background;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    for (const element of activePage.elements) {
-      context.save();
-      const centerX = element.x + element.width / 2;
-      const centerY = element.y + element.height / 2;
-      context.translate(centerX, centerY);
-      context.rotate((element.rotation * Math.PI) / 180);
-      if (element.type === "shape") {
-        context.fillStyle = element.style.backgroundColor ?? "#7057e8";
-        const radius = Math.min(element.style.borderRadius ?? 0, element.width / 2, element.height / 2);
-        context.beginPath();
-        context.roundRect(-element.width / 2, -element.height / 2, element.width, element.height, radius);
-        context.fill();
-      } else if (element.type === "image") {
-        try {
-          const image = new window.Image();
-          image.src = element.content;
-          await image.decode();
-          context.drawImage(image, -element.width / 2, -element.height / 2, element.width, element.height);
-        } catch {
-          context.fillStyle = "#eeeeee";
-          context.fillRect(-element.width / 2, -element.height / 2, element.width, element.height);
-        }
-      } else if (element.type === "text") {
-        const fontSize = element.style.fontSize ?? 40;
-        context.fillStyle = element.style.color ?? "#171717";
-        context.font = `${element.style.fontWeight ?? "normal"} ${fontSize}px ${element.style.fontFamily ?? "Arial"}`;
-        context.textAlign = element.style.textAlign ?? "left";
-        context.textBaseline = "top";
-        const words = element.content.split(/\s+/);
-        const lines: string[] = [];
-        let line = "";
-        for (const word of words) {
-          const candidate = line ? `${line} ${word}` : word;
-          if (line && context.measureText(candidate).width > element.width - 20) {
-            lines.push(line);
-            line = word;
-          } else line = candidate;
-        }
-        if (line) lines.push(line);
-        const textX = context.textAlign === "center" ? 0 : context.textAlign === "right" ? element.width / 2 - 10 : -element.width / 2 + 10;
-        lines.forEach((textLine, index) => context.fillText(textLine, textX, -element.height / 2 + 8 + index * fontSize * 1.18, element.width - 20));
-      }
-      context.restore();
-    }
-    canvas.toBlob((blob) => {
-      if (!blob) { setExportStatus("Could not create PNG."); return; }
+    try {
+      const blob = await renderCarouselPage(document, activePage, "image/png");
       const url = URL.createObjectURL(blob);
       const anchor = window.document.createElement("a");
       anchor.href = url;
-      anchor.download = `${document.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-slide.png`;
+      anchor.download = `${safeExportName(document.title)}-slide-${String(document.pages.indexOf(activePage) + 1).padStart(2, "0")}.png`;
       anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
       setExportStatus("PNG downloaded");
-      window.setTimeout(() => setExportStatus(""), 2500);
-    }, "image/png");
+    } catch (error) {
+      setExportStatus(error instanceof Error ? error.message : "PNG export failed.");
+    }
+  }
+
+  async function exportJpgAll() {
+    if (document.pages.length === 0) return;
+    setExportStatus(`Preparing ${document.pages.length} JPG slides…`);
+    try {
+      const baseName = safeExportName(document.title);
+      for (const [index, page] of document.pages.entries()) {
+        const blob = await renderCarouselPage(document, page, "image/jpeg", 0.94);
+        const url = URL.createObjectURL(blob);
+        const anchor = window.document.createElement("a");
+        anchor.href = url;
+        anchor.download = `${baseName}-slide-${String(index + 1).padStart(2, "0")}.jpg`;
+        anchor.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 3000);
+        setExportStatus(`Exporting JPG ${index + 1}/${document.pages.length}…`);
+        await new Promise((resolve) => window.setTimeout(resolve, 220));
+      }
+      setExportStatus("All JPG slides downloaded");
+    } catch (error) {
+      setExportStatus(error instanceof Error ? error.message : "JPG export failed.");
+    }
+  }
+
+  async function exportPdfAll() {
+    if (document.pages.length === 0) return;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setExportStatus("Allow pop-ups to export the PDF.");
+      return;
+    }
+    setExportStatus(`Preparing PDF · 0/${document.pages.length} slides…`);
+    try {
+      const pageImages: string[] = [];
+      for (const [index, page] of document.pages.entries()) {
+        const blob = await renderCarouselPage(document, page, "image/jpeg", 0.96);
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error("Could not prepare a PDF page."));
+          reader.readAsDataURL(blob);
+        });
+        pageImages.push(dataUrl);
+        setExportStatus(`Preparing PDF · ${index + 1}/${document.pages.length} slides…`);
+      }
+      const pages = pageImages.map((src) => `<section class="slide"><img src="${src}" alt="Carousel slide"></section>`).join("");
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${safeExportName(document.title)}</title><style>
+        @page{size:8in 10in;margin:0}
+        *{box-sizing:border-box}
+        html,body{margin:0;padding:0;background:#fff}
+        .slide{width:8in;height:10in;page-break-after:always;break-after:page;overflow:hidden}
+        .slide:last-child{page-break-after:auto;break-after:auto}
+        img{display:block;width:100%;height:100%;object-fit:contain}
+        @media screen{body{background:#e9e9e9}.slide{margin:20px auto;box-shadow:0 2px 16px #0002}}
+      </style></head><body>${pages}</body></html>`);
+      printWindow.document.close();
+      const images = Array.from(printWindow.document.images);
+      await Promise.all(images.map((image) => image.decode()));
+      setExportStatus("PDF ready · choose Save as PDF in the print dialog");
+      printWindow.focus();
+      printWindow.print();
+    } catch (error) {
+      printWindow.close();
+      setExportStatus(error instanceof Error ? error.message : "PDF export failed.");
+    }
   }
 
   async function signOut() {
@@ -425,7 +442,9 @@ export default function EditorPage() {
         <div className="editor-top-actions">
           <span className="editor-dimensions">1080 × 1350</span>
           {cloudUserId ? <button className="editor-export" onClick={signOut}>Sign out</button> : <Link className="editor-export" href="/login">Sign in to sync</Link>}
-          <button className="editor-export" onClick={exportPng}>Export PNG ↗</button>
+          <button className="editor-export" onClick={exportPng}>PNG</button>
+          <button className="editor-export" onClick={exportJpgAll}>JPG · All</button>
+          <button className="editor-export" onClick={exportPdfAll}>PDF · All ↗</button>
         </div>
       </header>
 
