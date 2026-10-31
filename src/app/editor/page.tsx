@@ -4,6 +4,7 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import AiEditPanel from "./ai-edit-panel";
 import { applySlideTextEdits } from "@/lib/carousel-core/ai-editing";
+import { buildCarouselPrintHtml, createZipBlob, sanitizeExportFileName } from "@/lib/carousel-core/export";
 import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
 import { createLatestSaveQueue, type LatestSaveQueue } from "@/lib/carousel-core/latest-save-queue";
 import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey } from "@/lib/carousel-core/draft-storage";
@@ -12,6 +13,7 @@ import {
   createEmptyCarouselDocument,
   type CarouselDocument,
   type CarouselElement,
+  type CarouselPage,
   validateCarouselDocument
 } from "@/lib/carousel-core/schema";
 
@@ -329,17 +331,16 @@ export default function EditorPage() {
     updateSelected({ style: { ...selectedElement.style, [key]: value } });
   }
 
-  async function exportPng() {
-    if (!activePage) return;
-    setExportStatus("Preparing PNG…");
+  async function renderPageJpeg(page: CarouselPage) {
     const canvas = window.document.createElement("canvas");
     canvas.width = document.width;
     canvas.height = document.height;
     const context = canvas.getContext("2d");
-    if (!context) { setExportStatus("PNG export is unavailable in this browser."); return; }
-    context.fillStyle = activePage.background;
+    if (!context) throw new Error("JPG export is unavailable in this browser.");
+    context.fillStyle = page.background;
     context.fillRect(0, 0, canvas.width, canvas.height);
-    for (const element of activePage.elements) {
+
+    for (const element of page.elements) {
       context.save();
       const centerX = element.x + element.width / 2;
       const centerY = element.y + element.height / 2;
@@ -367,7 +368,7 @@ export default function EditorPage() {
         context.font = `${element.style.fontWeight ?? "normal"} ${fontSize}px ${element.style.fontFamily ?? "Arial"}`;
         context.textAlign = element.style.textAlign ?? "left";
         context.textBaseline = "top";
-        const words = element.content.split(/\s+/);
+        const words = element.content.split(/\\s+/);
         const lines: string[] = [];
         let line = "";
         for (const word of words) {
@@ -383,17 +384,49 @@ export default function EditorPage() {
       }
       context.restore();
     }
-    canvas.toBlob((blob) => {
-      if (!blob) { setExportStatus("Could not create PNG."); return; }
-      const url = URL.createObjectURL(blob);
+
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error(`Could not render ${page.name} as JPG.`)), "image/jpeg", 0.92);
+    });
+  }
+
+  async function exportJpgs() {
+    if (!document.pages.length) return;
+    setExportStatus(`Preparing ${document.pages.length} JPG slides…`);
+    try {
+      const baseName = sanitizeExportFileName(document.title);
+      const files: Array<{ name: string; blob: Blob }> = [];
+      for (const [index, page] of document.pages.entries()) {
+        setExportStatus(`Rendering slide ${index + 1} of ${document.pages.length}…`);
+        const blob = await renderPageJpeg(page);
+        files.push({ name: `${baseName}-slide-${String(index + 1).padStart(2, "0")}.jpg`, blob });
+      }
+      setExportStatus("Packing JPG files…");
+      const archive = await createZipBlob(files);
+      const url = URL.createObjectURL(archive);
       const anchor = window.document.createElement("a");
       anchor.href = url;
-      anchor.download = `${document.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-slide.png`;
+      anchor.download = `${baseName}-slides.zip`;
       anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setExportStatus("PNG downloaded");
-      window.setTimeout(() => setExportStatus(""), 2500);
-    }, "image/png");
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setExportStatus(`${files.length} JPG slides downloaded as ZIP`);
+    } catch (error) {
+      setExportStatus(error instanceof Error ? error.message : "JPG export failed.");
+    }
+  }
+
+  function exportPdf() {
+    if (!document.pages.length) return;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setExportStatus("Allow pop-ups to export PDF, then try again.");
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.open();
+    printWindow.document.write(buildCarouselPrintHtml(document));
+    printWindow.document.close();
+    setExportStatus("PDF print dialog opened — choose Save as PDF.");
   }
 
   async function signOut() {
@@ -425,7 +458,8 @@ export default function EditorPage() {
         <div className="editor-top-actions">
           <span className="editor-dimensions">1080 × 1350</span>
           {cloudUserId ? <button className="editor-export" onClick={signOut}>Sign out</button> : <Link className="editor-export" href="/login">Sign in to sync</Link>}
-          <button className="editor-export" onClick={exportPng}>Export PNG ↗</button>
+          <button className="editor-export" onClick={exportJpgs} disabled={!ready || !document.pages.length}>Export JPG ↓</button>
+          <button className="editor-export" onClick={exportPdf} disabled={!ready || !document.pages.length}>Export PDF ↗</button>
         </div>
       </header>
 
