@@ -141,8 +141,11 @@ export async function bootstrapCloudDocument(
         return { user, projectId, document: localDocument.document, cloudUpdatedAt: updatedAt, localConflict: false };
       }
       const parsed = validateCarouselDocument(existing.data.document);
-      const localConflict = JSON.stringify(localDocument.document) !== JSON.stringify(parsed);
-      return { user, projectId, document: await hydrateDocumentImages(supabase, parsed), cloudUpdatedAt: existing.data.updated_at, localConflict };
+      // Compare equivalent representations: cloud images are storage:// references,
+      // while local drafts contain hydrated data URLs.
+      const cloudDocument = await hydrateDocumentImages(supabase, parsed);
+      const localConflict = JSON.stringify(localDocument.document) !== JSON.stringify(cloudDocument);
+      return { user, projectId, document: cloudDocument, cloudUpdatedAt: existing.data.updated_at, localConflict };
     }
     const updatedAt = await saveCloudDocument(supabase, projectId, user.id, localDocument.document);
     return { user, projectId, document: localDocument.document, cloudUpdatedAt: updatedAt, localConflict: false };
