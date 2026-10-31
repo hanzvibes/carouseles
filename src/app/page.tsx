@@ -7,7 +7,7 @@ import { applyBrandKit, brandKitSchema, carouselTemplates, createTemplateDocumen
 import { validateCarouselDocument, type CarouselDocument } from "@/lib/carousel-core/schema";
 
 type SavedProject = { id: string; title: string; document: CarouselDocument; slides: number; updatedAt: string };
-const projectTones = ["violet", "orange", "blue", "green", "pink", "slate"];
+const projectTones = ["violet", "orange", "blue"];
 
 function formatProjectDate(value: string) {
   const date = new Date(value);
@@ -213,9 +213,9 @@ export default function Home() {
               <div className="project-empty"><strong>No saved carousels yet</strong><span>Start with an AI prompt or a template. Your saved work will appear here.</span><Link href="/editor">Create your first carousel ↗</Link></div>
             ) : (
               <div className="project-grid">{savedProjects.map((project, index) => <article className="project-card" key={project.id}>
-                <button type="button" className={`project-preview ${projectTones[index % projectTones.length]}`} onClick={() => openSavedProject(project)} aria-label={`Open ${project.title}`} style={{ width: "100%", border: 0, textAlign: "left", cursor: "pointer" }}>
+                <button type="button" className={`project-preview ${projectTones[index % projectTones.length]}`} onClick={() => openSavedProject(project)} aria-label={`Open ${project.title}`} style={{ width: "100%", border: 0, textAlign: "left", cursor: "pointer", backgroundColor: project.document.pages[0].background, color: project.document.pages[0].elements.find((element) => element.type === "text")?.style.color || undefined }}>
                   <div className="preview-top"><span>CAROUSELES / 0{index + 1}</span><span>↗</span></div>
-                  <div className="preview-copy"><small>SAVED CAROUSEL</small><strong>{project.title}</strong><span className="preview-lines">━━━━━━━━━━━━<br/>━━━━━━━━</span></div>
+                  <div className="preview-copy"><small>SLIDE 01 PREVIEW</small><strong>{project.document.pages[0].elements.find((element) => element.type === "text")?.content.slice(0, 88) || project.title}</strong><span className="preview-lines">━━━━━━━━━━━━<br/>━━━━━━━━</span></div>
                   <div className="preview-bottom"><span>01 — {String(project.slides).padStart(2, "0")}</span><span>✳</span></div>
                 </button>
                 <div className="project-meta"><div><b>{project.title}</b><small>{formatProjectDate(project.updatedAt)} · {project.slides} slides</small></div><button type="button" onClick={() => openSavedProject(project)} aria-label={`Open ${project.title}`}>↗</button></div>
