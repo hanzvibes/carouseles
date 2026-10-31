@@ -23,6 +23,7 @@ export default function EditorPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [exportStatus, setExportStatus] = useState("");
 
   useEffect(() => {
     try {
@@ -131,6 +132,63 @@ export default function EditorPage() {
     updateSelected({ style: { ...selectedElement.style, [key]: value } });
   }
 
+  async function exportPng() {
+    if (!activePage) return;
+    setExportStatus("Preparing PNG…");
+    const canvas = window.document.createElement("canvas");
+    canvas.width = document.width;
+    canvas.height = document.height;
+    const context = canvas.getContext("2d");
+    if (!context) { setExportStatus("PNG export is unavailable in this browser."); return; }
+    context.fillStyle = activePage.background;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    for (const element of activePage.elements) {
+      context.save();
+      const centerX = element.x + element.width / 2;
+      const centerY = element.y + element.height / 2;
+      context.translate(centerX, centerY);
+      context.rotate((element.rotation * Math.PI) / 180);
+      if (element.type === "shape") {
+        context.fillStyle = element.style.backgroundColor ?? "#7057e8";
+        const radius = Math.min(element.style.borderRadius ?? 0, element.width / 2, element.height / 2);
+        context.beginPath();
+        context.roundRect(-element.width / 2, -element.height / 2, element.width, element.height, radius);
+        context.fill();
+      } else if (element.type === "text") {
+        const fontSize = element.style.fontSize ?? 40;
+        context.fillStyle = element.style.color ?? "#171717";
+        context.font = `${element.style.fontWeight ?? "normal"} ${fontSize}px ${element.style.fontFamily ?? "Arial"}`;
+        context.textAlign = element.style.textAlign ?? "left";
+        context.textBaseline = "top";
+        const words = element.content.split(/\\s+/);
+        const lines: string[] = [];
+        let line = "";
+        for (const word of words) {
+          const candidate = line ? `${line} ${word}` : word;
+          if (line && context.measureText(candidate).width > element.width - 20) {
+            lines.push(line);
+            line = word;
+          } else line = candidate;
+        }
+        if (line) lines.push(line);
+        const textX = context.textAlign === "center" ? 0 : context.textAlign === "right" ? element.width / 2 - 10 : -element.width / 2 + 10;
+        lines.forEach((textLine, index) => context.fillText(textLine, textX, -element.height / 2 + 8 + index * fontSize * 1.18, element.width - 20));
+      }
+      context.restore();
+    }
+    canvas.toBlob((blob) => {
+      if (!blob) { setExportStatus("Could not create PNG."); return; }
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${document.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-slide.png`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setExportStatus("PNG downloaded");
+      window.setTimeout(() => setExportStatus(""), 2500);
+    }, "image/png");
+  }
+
   function renameDocument(value: string) {
     setDocument((current) => ({ ...current, title: value || "Untitled carousel" }));
   }
@@ -194,7 +252,7 @@ export default function EditorPage() {
               )}
             </div>
           </div>
-          <div className="canvas-footer"><span>CAROUSEL CORE · SCHEMA V1</span><span>{activePage?.elements.length ?? 0} elements</span></div>
+          <div className="canvas-footer"><span>CAROUSEL CORE · SCHEMA V1</span><span>{exportStatus || `${activePage?.elements.length ?? 0} elements`}</span></div>
         </section>
 
         <aside className="editor-inspector">
