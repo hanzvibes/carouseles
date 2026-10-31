@@ -167,8 +167,25 @@ export default function EditorPage() {
     }
 
     const queue = cloudSaveQueueRef.current.queue;
+    const handleOffline = () => {
+      if (cloudSaveQueueRef.current?.key === queueKey) {
+        setCloudStatus("Offline · local draft kept");
+      }
+    };
+    const handleOnline = () => {
+      if (cloudSaveQueueRef.current?.key !== queueKey) return;
+      setCloudStatus("Connection restored · syncing");
+      queue.enqueue(document);
+    };
+
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
     const timeout = window.setTimeout(() => queue.enqueue(document), 900);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+    };
   }, [document, ready, cloudUserId, cloudProjectId]);
 
   useEffect(() => {
