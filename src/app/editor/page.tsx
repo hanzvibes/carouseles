@@ -1,6 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
+import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey } from "@/lib/carousel-core/draft-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createEmptyCarouselDocument,
@@ -9,7 +12,16 @@ import {
   validateCarouselDocument
 } from "@/lib/carousel-core/schema";
 
-const STORAGE_KEY = "carouseles:local-draft:v1";
+
+function readLocalDraft(storageKey: string, legacyFallback = false): CarouselDocument | null {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+      ?? (legacyFallback ? window.localStorage.getItem(LEGACY_DRAFT_STORAGE_KEY) : null);
+    return raw ? validateCarouselDocument(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
 
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -24,29 +36,93 @@ export default function EditorPage() {
   const [ready, setReady] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [cloudUserId, setCloudUserId] = useState<string | null>(null);
+  const [draftStorageKey, setDraftStorageKey] = useState(ANONYMOUS_DRAFT_STORAGE_KEY);
+  const [cloudProjectId, setCloudProjectId] = useState<string | null>(null);
+  const [cloudStatus, setCloudStatus] = useState("Local draft");
+  const [cloudError, setCloudError] = useState("");
   const [exportStatus, setExportStatus] = useState("");
   const imageInputRef = useRef<HTMLInputElement>(null);
   const interactionRef = useRef<{ id: string; mode: "move" | "resize"; pointerX: number; pointerY: number; x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = validateCarouselDocument(JSON.parse(raw));
-        setDocument(parsed);
-        setActivePageId(parsed.pages[0].id);
+    let cancelled = false;
+
+    async function initializeEditor() {
+      let authenticatedUserId: string | null = null;
+      const supabase = createSupabaseBrowserClient();
+
+      if (!supabase) {
+        const localDocument = readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
+        if (!cancelled && localDocument) {
+          setDocument(localDocument);
+          setActivePageId(localDocument.pages[0].id);
+        }
+        if (!cancelled) {
+          setCloudStatus("Local only · configure Supabase");
+          setReady(true);
+        }
+        return;
       }
-    } catch {
-      // Ignore an invalid local draft and start with a fresh document.
+
+      try {
+        const auth = await supabase.auth.getUser();
+        if (auth.error) throw auth.error;
+
+        if (!auth.data.user) {
+          // Never upload an anonymous draft into a signed-in account.
+          const localDocument = readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
+          if (!cancelled && localDocument) {
+            setDocument(localDocument);
+            setActivePageId(localDocument.pages[0].id);
+          }
+          if (!cancelled) {
+            setCloudStatus("Local draft · sign in to sync");
+            setCloudError("");
+            setReady(true);
+          }
+          return;
+        }
+
+        const userId = auth.data.user.id;
+        authenticatedUserId = userId;
+        setCloudUserId(userId);
+        setDraftStorageKey(getDraftStorageKey(userId));
+        const localDocument = readLocalDraft(getDraftStorageKey(userId), canReadLegacyDraft(userId));
+        const bootstrap = await bootstrapCloudDocument(supabase, localDocument);
+        if (cancelled) return;
+
+        setDocument(bootstrap.document);
+        setActivePageId(bootstrap.document.pages[0].id);
+        setCloudUserId(bootstrap.user.id);
+        setCloudProjectId(bootstrap.projectId);
+        setCloudStatus("Cloud connected");
+        setCloudError("");
+      } catch (error) {
+        if (cancelled) return;
+        const localDocument = authenticatedUserId
+          ? readLocalDraft(getDraftStorageKey(authenticatedUserId), canReadLegacyDraft(authenticatedUserId))
+          : readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
+        if (localDocument) {
+          setDocument(localDocument);
+          setActivePageId(localDocument.pages[0].id);
+        }
+        setCloudStatus(authenticatedUserId ? "Cloud unavailable · user draft kept" : "Local draft · sign in to sync");
+        setCloudError(error instanceof Error ? error.message : "Cloud connection failed");
+      } finally {
+        if (!cancelled) setReady(true);
+      }
     }
-    setReady(true);
+
+    void initializeEditor();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!ready) return;
     const timeout = window.setTimeout(() => {
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
+        window.localStorage.setItem(draftStorageKey, JSON.stringify(document));
         setSavedAt(new Date());
         setSaveError(false);
       } catch {
@@ -54,7 +130,25 @@ export default function EditorPage() {
       }
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [document, ready]);
+  }, [document, ready, draftStorageKey]);
+
+  useEffect(() => {
+    if (!ready || !cloudUserId || !cloudProjectId) return;
+    const timeout = window.setTimeout(async () => {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) return;
+      setCloudStatus("Syncing…");
+      try {
+        await saveCloudDocument(supabase, cloudProjectId, cloudUserId, document);
+        setCloudStatus("Saved to cloud");
+        setCloudError("");
+      } catch (error) {
+        setCloudStatus("Cloud save failed · local draft kept");
+        setCloudError(error instanceof Error ? error.message : "Cloud save failed");
+      }
+    }, 900);
+    return () => window.clearTimeout(timeout);
+  }, [document, ready, cloudUserId, cloudProjectId]);
 
   useEffect(() => {
     if (!ready) return;
@@ -134,7 +228,7 @@ export default function EditorPage() {
 
   function addImage(file?: File) {
     if (!file) return;
-    if (!file.type.startsWith("image/")) { setExportStatus("Choose an image file."); return; }
+    if (!["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"].includes(file.type)) { setExportStatus("Use a JPG, PNG, WebP, GIF, or SVG image."); return; }
     if (file.size > 2 * 1024 * 1024) { setExportStatus("Image must be 2 MB or smaller."); return; }
     const currentSize = new Blob([JSON.stringify(document)]).size;
     if (currentSize + file.size * 1.4 > 3.5 * 1024 * 1024) { setExportStatus("This draft is near the browser storage limit. Remove an image first."); return; }
@@ -268,6 +362,19 @@ export default function EditorPage() {
     }, "image/png");
   }
 
+  async function signOut() {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setCloudError(error.message);
+      return;
+    }
+    setCloudUserId(null);
+    setCloudProjectId(null);
+    setCloudStatus("Signed out · local draft kept");
+  }
+
   function renameDocument(value: string) {
     setDocument((current) => ({ ...current, title: value || "Untitled carousel" }));
   }
@@ -279,10 +386,11 @@ export default function EditorPage() {
           <Link href="/" className="editor-back" aria-label="Back to dashboard">←</Link>
           <span className="editor-brand-mark">c.</span>
           <input className="document-title" aria-label="Project title" value={document.title} onChange={(event) => renameDocument(event.target.value)} />
-          <span className="save-indicator"><i />{saveError ? "Storage full" : savedAt ? "Saved locally" : ready ? "Saving…" : "Loading…"}</span>
+          <span className="save-indicator"><i />{saveError ? "Storage full" : cloudStatus}</span>
         </div>
         <div className="editor-top-actions">
           <span className="editor-dimensions">1080 × 1350</span>
+          {cloudUserId ? <button className="editor-export" onClick={signOut}>Sign out</button> : <Link className="editor-export" href="/login">Sign in to sync</Link>}
           <button className="editor-export" onClick={exportPng}>Export PNG ↗</button>
         </div>
       </header>
@@ -335,7 +443,7 @@ export default function EditorPage() {
               )}
             </div>
           </div>
-          <div className="canvas-footer"><span>CAROUSEL CORE · SCHEMA V1</span><span>{exportStatus || `${activePage?.elements.length ?? 0} elements`}</span></div>
+          <div className="canvas-footer"><span>CAROUSEL CORE · SCHEMA V1</span><span>{exportStatus || cloudError || `${activePage?.elements.length ?? 0} elements`}</span></div>
         </section>
 
         <aside className="editor-inspector">
