@@ -41,7 +41,7 @@ Animated video export, social scheduling, multiplayer editing, arbitrary code ex
 
 ## Development status
 
-This repository now includes an initial dashboard, a browser-based multi-slide editor, draggable/resizable text and shape elements, image upload and replacement, local draft persistence, PNG export (including images) for the active slide, and Carousel Core schema validation. Cloud projects, AI generation, image elements, PDF export, and production deployment are not implemented yet.
+This repository includes an initial dashboard, a browser-based multi-slide editor, draggable/resizable elements, image upload and replacement, local draft persistence, PNG export for the active slide, and Carousel Core schema validation. Supabase email magic-link sign-in and cloud document sync are implemented behind environment configuration. AI generation, durable Storage-backed image assets, PDF export, and production deployment are not implemented yet.
 
 ## Documentation
 
@@ -59,4 +59,4 @@ pnpm install
 pnpm dev
 ```
 
-Environment variables will be documented in `.env.example` as integrations are implemented. Never commit real API keys.
+Copy `.env.example` to `.env.local` and set the Carouseles Supabase project URL and publishable key. Never add a service-role/secret key to a `NEXT_PUBLIC_*` variable or commit real credentials. In Supabase Auth URL Configuration, add your local and deployed app URLs to the redirect allow list (for example, `http://localhost:3000/**` and your production origin). The editor keeps a local draft and syncs the current document to the `carouseles_*` tables when signed in.
