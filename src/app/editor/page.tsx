@@ -7,7 +7,7 @@ import { applySlideTextEdits } from "@/lib/carousel-core/ai-editing";
 import { renderCarouselPage, safeExportName } from "@/lib/carousel-core/export";
 import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
 import { createLatestSaveQueue, type LatestSaveQueue } from "@/lib/carousel-core/latest-save-queue";
-import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey, parseLocalDraft, serializeLocalDraft } from "@/lib/carousel-core/draft-storage";
+import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey, getConflictDraftStorageKey, parseLocalDraft, serializeLocalDraft } from "@/lib/carousel-core/draft-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createEmptyCarouselDocument,
@@ -45,6 +45,9 @@ export default function EditorPage() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const interactionRef = useRef<{ id: string; mode: "move" | "resize"; pointerX: number; pointerY: number; x: number; y: number; width: number; height: number } | null>(null);
   const cloudSaveQueueRef = useRef<{ key: string; queue: LatestSaveQueue<CarouselDocument> } | null>(null);
+  const cloudUpdatedAtRef = useRef<string | null>(null);
+  const documentRef = useRef(document);
+  documentRef.current = document;
 
   useEffect(() => {
     let cancelled = false;
@@ -93,11 +96,17 @@ export default function EditorPage() {
         const bootstrap = await bootstrapCloudDocument(supabase, localDocument);
         if (cancelled) return;
 
+        cloudUpdatedAtRef.current = bootstrap.cloudUpdatedAt;
+        if (bootstrap.localConflict && localDocument) {
+          try {
+            window.localStorage.setItem(getConflictDraftStorageKey(userId), serializeLocalDraft(localDocument.document, localDocument.savedAt ?? Date.now(), localDocument.baseCloudUpdatedAt));
+          } catch { /* Keep cloud data available even when local conflict backup storage is full. */ }
+        }
         setDocument(bootstrap.document);
         setActivePageId(bootstrap.document.pages[0].id);
         setCloudUserId(bootstrap.user.id);
         setCloudProjectId(bootstrap.projectId);
-        setCloudStatus("Cloud connected");
+        setCloudStatus(bootstrap.localConflict ? "Cloud updated elsewhere · local copy preserved" : "Cloud connected");
         setCloudError("");
       } catch (error) {
         if (cancelled) return;
@@ -122,7 +131,7 @@ export default function EditorPage() {
   useEffect(() => {
     if (!ready) return;
     try {
-      window.localStorage.setItem(draftStorageKey, serializeLocalDraft(document));
+      window.localStorage.setItem(draftStorageKey, serializeLocalDraft(document, Date.now(), cloudUpdatedAtRef.current));
       setSavedAt(new Date());
       setSaveError(false);
     } catch {
@@ -144,7 +153,11 @@ export default function EditorPage() {
           if (!supabase) return;
           setCloudStatus("Syncing…");
           try {
-            await saveCloudDocument(supabase, cloudProjectId, cloudUserId, snapshot);
+            const updatedAt = await saveCloudDocument(supabase, cloudProjectId, cloudUserId, snapshot);
+            cloudUpdatedAtRef.current = updatedAt;
+            try {
+              window.localStorage.setItem(draftStorageKey, serializeLocalDraft(documentRef.current, Date.now(), updatedAt));
+            } catch { /* Cloud save succeeded; local backup is best-effort. */ }
             if (isCurrentQueue()) {
               setCloudStatus("Saved to cloud");
               setCloudError("");
