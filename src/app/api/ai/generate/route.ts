@@ -32,15 +32,21 @@ export async function POST(request: Request) {
     if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid generation request." }, { status: 400 });
     const input = parsed.data;
 
-    const { data, error } = await supabase.from("carouseles_ai_providers")
-      .select("id,user_id,base_url,api_key_ciphertext,api_key_iv,api_key_tag,model_id,role,capabilities,is_default,created_at,updated_at,name,provider_type")
-      .eq("user_id", user.id).eq("role", "planner")
+    const providerColumns = "id,user_id,base_url,api_key_ciphertext,api_key_iv,api_key_tag,model_id,role,capabilities,is_default,created_at,updated_at,name,provider_type";
+    const plannerResult = await supabase.from("carouseles_ai_providers")
+      .select(providerColumns).eq("user_id", user.id).eq("role", "planner")
       .order("is_default", { ascending: false }).order("created_at", { ascending: true })
       .limit(1).maybeSingle();
-    if (error) throw error;
-    if (!data) return NextResponse.json({ error: "No Planner provider configured. Assign an AI provider to the Planner role first." }, { status: 404 });
+    if (plannerResult.error) throw plannerResult.error;
 
-    const provider = data as ProviderRow;
+    // A user's default text provider is a safe fallback for a first-run experience.
+    const providerResult = plannerResult.data ? plannerResult : await supabase.from("carouseles_ai_providers")
+      .select(providerColumns).eq("user_id", user.id).eq("is_default", true)
+      .limit(1).maybeSingle();
+    if (providerResult.error) throw providerResult.error;
+    if (!providerResult.data) return NextResponse.json({ error: "Connect an AI provider and mark it as the default, or assign one to the Planner role." }, { status: 404 });
+
+    const provider = providerResult.data as ProviderRow;
     if (!provider.capabilities?.text) return NextResponse.json({ error: "Your Planner provider does not support text generation." }, { status: 400 });
     const content = await callProviderChat(provider.base_url, decryptApiKey(provider), provider.model_id, [
       { role: "system", content: systemPrompt },
