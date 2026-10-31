@@ -164,5 +164,6 @@ export async function createZipBlob(files: Array<{ name: string; blob: Blob }>) 
   endView.setUint32(16, localOffset, true);
   endView.setUint16(20, 0, true);
 
-  return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+  const parts = [...localParts, ...centralParts, end].map((part) => part.buffer.slice(part.byteOffset, part.byteOffset + part.byteLength) as ArrayBuffer);
+  return new Blob(parts, { type: "application/zip" });
 }
