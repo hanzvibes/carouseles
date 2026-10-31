@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
+import { createLatestSaveQueue, type LatestSaveQueue } from "@/lib/carousel-core/latest-save-queue";
 import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey } from "@/lib/carousel-core/draft-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -44,6 +45,7 @@ export default function EditorPage() {
   const [exportStatus, setExportStatus] = useState("");
   const imageInputRef = useRef<HTMLInputElement>(null);
   const interactionRef = useRef<{ id: string; mode: "move" | "resize"; pointerX: number; pointerY: number; x: number; y: number; width: number; height: number } | null>(null);
+  const cloudSaveQueueRef = useRef<{ key: string; queue: LatestSaveQueue<CarouselDocument> } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,19 +136,35 @@ export default function EditorPage() {
 
   useEffect(() => {
     if (!ready || !cloudUserId || !cloudProjectId) return;
-    const timeout = window.setTimeout(async () => {
-      const supabase = createSupabaseBrowserClient();
-      if (!supabase) return;
-      setCloudStatus("Syncing…");
-      try {
-        await saveCloudDocument(supabase, cloudProjectId, cloudUserId, document);
-        setCloudStatus("Saved to cloud");
-        setCloudError("");
-      } catch (error) {
-        setCloudStatus("Cloud save failed · local draft kept");
-        setCloudError(error instanceof Error ? error.message : "Cloud save failed");
-      }
-    }, 900);
+
+    const queueKey = `${cloudUserId}:${cloudProjectId}`;
+    if (cloudSaveQueueRef.current?.key !== queueKey) {
+      const isCurrentQueue = () => cloudSaveQueueRef.current?.key === queueKey;
+      cloudSaveQueueRef.current = {
+        key: queueKey,
+        queue: createLatestSaveQueue(async (snapshot) => {
+          if (!isCurrentQueue()) return;
+          const supabase = createSupabaseBrowserClient();
+          if (!supabase) return;
+          setCloudStatus("Syncing…");
+          try {
+            await saveCloudDocument(supabase, cloudProjectId, cloudUserId, snapshot);
+            if (isCurrentQueue()) {
+              setCloudStatus("Saved to cloud");
+              setCloudError("");
+            }
+          } catch (error) {
+            if (isCurrentQueue()) {
+              setCloudStatus("Cloud save failed · local draft kept");
+              setCloudError(error instanceof Error ? error.message : "Cloud save failed");
+            }
+          }
+        })
+      };
+    }
+
+    const queue = cloudSaveQueueRef.current.queue;
+    const timeout = window.setTimeout(() => queue.enqueue(document), 900);
     return () => window.clearTimeout(timeout);
   }, [document, ready, cloudUserId, cloudProjectId]);
 
