@@ -13,7 +13,8 @@ describe("AI slide editing", () => {
   it("validates bounded instructions and text-only payloads", () => {
     expect(slideEditRequestSchema.safeParse({ instruction: "Improve this copy", elements: [{ id: "title", content: "Old title" }] }).success).toBe(true);
     expect(slideEditRequestSchema.safeParse({ instruction: "no", elements: [{ id: "title", content: "Old title" }] }).success).toBe(false);
-    expect(slideEditRequestSchema.safeParse({ instruction: "Improve this copy", elements: [{ id: "photo", content: "data:image/png;base64,abc" }] }).success).toBe(true);
+    expect(slideEditRequestSchema.safeParse({ instruction: "Improve this copy", elements: [{ id: "photo", content: "data:image/png;base64,abc" }] }).success).toBe(false);
+    expect(slideEditRequestSchema.safeParse({ instruction: "Improve this copy", elements: [{ id: "title", content: "A" }, { id: "title", content: "B" }] }).success).toBe(false);
   });
   it("rejects duplicate or missing element edits", () => {
     expect(slideTextEditsSchema.safeParse({ edits: [{ id: "title", content: "New title" }, { id: "title", content: "Duplicate" }] }).success).toBe(true);
