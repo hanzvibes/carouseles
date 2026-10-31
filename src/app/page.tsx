@@ -4,12 +4,16 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { applyBrandKit, brandKitSchema, carouselTemplates, createTemplateDocument, type BrandKit, type TemplateId } from "@/lib/carousel-core/templates";
+import { validateCarouselDocument, type CarouselDocument } from "@/lib/carousel-core/schema";
 
-const projects = [
-  { title: "The quiet power of consistency", category: "CREATOR EDUCATION", slides: 7, tone: "violet", date: "Just now" },
-  { title: "Build systems, not habits", category: "PERSONAL BRAND", slides: 6, tone: "orange", date: "Yesterday" },
-  { title: "A better way to plan your week", category: "PRODUCTIVITY", slides: 8, tone: "blue", date: "2 days ago" }
-];
+type SavedProject = { id: string; title: string; document: CarouselDocument; slides: number; updatedAt: string };
+const projectTones = ["violet", "orange", "blue", "green", "pink", "slate"];
+
+function formatProjectDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Saved project";
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
+}
 const BRAND_KIT_KEY = "carouseles:brand-kit";
 const defaultBrandKit: BrandKit = { name: "My brand", colors: ["#20201f", "#f3efe7", "#b56d4b"], fontFamily: "Manrope" };
 
@@ -22,6 +26,9 @@ export default function Home() {
   const [generating, setGenerating] = useState(false);
   const [brandKit, setBrandKit] = useState<BrandKit>(defaultBrandKit);
   const [kitNotice, setKitNotice] = useState("");
+  const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState("");
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
   useEffect(() => {
@@ -32,6 +39,51 @@ export default function Home() {
       window.localStorage.removeItem(BRAND_KIT_KEY);
     }
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSavedProjects() {
+      if (!supabase) {
+        if (!cancelled) setProjectsLoading(false);
+        return;
+      }
+      try {
+        const auth = await supabase.auth.getUser();
+        if (auth.error) throw auth.error;
+        if (!auth.data.user) {
+          if (!cancelled) setSavedProjects([]);
+          return;
+        }
+        const result = await supabase.from("carouseles_documents")
+          .select("id, title, document, updated_at")
+          .eq("user_id", auth.data.user.id)
+          .order("updated_at", { ascending: false })
+          .limit(6);
+        if (result.error) throw result.error;
+        const projects = (result.data ?? []).flatMap((row) => {
+          try {
+            const document = validateCarouselDocument(row.document);
+            return [{
+              id: row.id as string,
+              title: (row.title as string) || document.title,
+              document,
+              slides: document.pages.length,
+              updatedAt: row.updated_at as string
+            }];
+          } catch {
+            return [];
+          }
+        });
+        if (!cancelled) setSavedProjects(projects);
+      } catch {
+        if (!cancelled) setProjectsError("Could not load saved projects. Your drafts are still safe.");
+      } finally {
+        if (!cancelled) setProjectsLoading(false);
+      }
+    }
+    void loadSavedProjects();
+    return () => { cancelled = true; };
+  }, [supabase]);
 
   async function generateCarousel() {
     if (prompt.trim().length < 8) { setNotice("Add a little more detail to your idea (at least 8 characters)."); return; }
@@ -59,6 +111,15 @@ export default function Home() {
       setNotice(error instanceof Error ? error.message : "Could not generate this carousel.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  function openSavedProject(project: SavedProject) {
+    try {
+      window.localStorage.setItem("carouseles:generated-document", JSON.stringify(project.document));
+      window.location.href = "/editor";
+    } catch {
+      setProjectsError("This project could not be opened in this browser.");
     }
   }
 
@@ -146,8 +207,20 @@ export default function Home() {
 
           <section className="projects-section" id="projects">
             <div className="section-heading"><div><div className="eyebrow">YOUR CANVAS</div><h2>Recent projects</h2></div><Link href="/editor">Open editor <span>↗</span></Link></div>
-            <div className="filter-row"><button className="filter active-filter">All projects</button><button className="filter">My drafts</button></div>
-            <div className="project-grid">{projects.map((project, index) => <article className="project-card" key={project.title}><div className={`project-preview ${project.tone}`}><div className="preview-top"><span>CAROUSELES / 0{index + 1}</span><span>↗</span></div><div className="preview-copy"><small>{project.category}</small><strong>{project.title}</strong><span className="preview-lines">━━━━━━━━━━━━<br/>━━━━━━━━</span></div><div className="preview-bottom"><span>01 — 0{project.slides}</span><span>✳</span></div></div><div className="project-meta"><div><b>{project.title}</b><small>{project.date} · {project.slides} slides</small></div><button aria-label={`More options for ${project.title}`}>···</button></div></article>)}</div>
+            <div className="filter-row"><span className="filter active-filter">All projects</span><span className="section-subtitle">Latest 6 saved carousels</span></div>
+            {projectsError && <p className="notice" role="status">{projectsError}</p>}
+            {projectsLoading ? <p className="section-subtitle" role="status">Loading your projects…</p> : savedProjects.length === 0 ? (
+              <div className="project-empty"><strong>No saved carousels yet</strong><span>Start with an AI prompt or a template. Your saved work will appear here.</span><Link href="/editor">Create your first carousel ↗</Link></div>
+            ) : (
+              <div className="project-grid">{savedProjects.map((project, index) => <article className="project-card" key={project.id}>
+                <button type="button" className={`project-preview ${projectTones[index % projectTones.length]}`} onClick={() => openSavedProject(project)} aria-label={`Open ${project.title}`} style={{ width: "100%", border: 0, textAlign: "left", cursor: "pointer" }}>
+                  <div className="preview-top"><span>CAROUSELES / 0{index + 1}</span><span>↗</span></div>
+                  <div className="preview-copy"><small>SAVED CAROUSEL</small><strong>{project.title}</strong><span className="preview-lines">━━━━━━━━━━━━<br/>━━━━━━━━</span></div>
+                  <div className="preview-bottom"><span>01 — {String(project.slides).padStart(2, "0")}</span><span>✳</span></div>
+                </button>
+                <div className="project-meta"><div><b>{project.title}</b><small>{formatProjectDate(project.updatedAt)} · {project.slides} slides</small></div><button type="button" onClick={() => openSavedProject(project)} aria-label={`Open ${project.title}`}>↗</button></div>
+              </article>)}</div>
+            )}
           </section>
           <footer className="footer-note"><span>CAROUSELES</span><span>One idea. Multiple slides. Infinite possibilities.</span><span>v0.4.0</span></footer>
         </div>
