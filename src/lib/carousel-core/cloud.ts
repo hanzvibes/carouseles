@@ -10,7 +10,7 @@ type CloudDocumentRow = { id: string; document: unknown; updated_at: string };
 type CloudVersionRow = { id: string; updated_at: string };
 const ASSET_BUCKET = "carouseles-assets";
 const STORAGE_PREFIX = "storage://";
-const uploadedImageContent = new Map<string, string>();
+const uploadedImagePaths = new Map<string, string>();
 const cloudVersions = new Map<string, string | null>();
 
 export class CloudDraftConflictError extends Error {
@@ -81,10 +81,14 @@ async function uploadDocumentImages(
       if (blob.size === 0 || blob.size > 10 * 1024 * 1024) throw new Error("Image must be between 1 byte and 10 MB.");
       const mimeType = blob.type || "image/png";
       const extension = extensionForMime(mimeType);
-      const storagePath = `${userId}/${document.id}/${encodeURIComponent(element.id)}.${extension}`;
-      if (uploadedImageContent.get(storagePath) !== element.content) {
+      const cacheKey = `${userId}:${document.id}:${element.id}:${element.content}`;
+      let storagePath = uploadedImagePaths.get(cacheKey);
+      if (!storagePath) {
+        // Immutable asset paths prevent a stale save from replacing an image
+        // that is still referenced by the latest cloud document.
+        storagePath = `${userId}/${document.id}/${encodeURIComponent(element.id)}/${crypto.randomUUID()}.${extension}`;
         const upload = await supabase.storage.from(ASSET_BUCKET).upload(storagePath, blob, {
-          contentType: mimeType, upsert: true, cacheControl: "3600"
+          contentType: mimeType, upsert: false, cacheControl: "3600"
         });
         if (upload.error) throw upload.error;
 
@@ -97,7 +101,7 @@ async function uploadDocumentImages(
           file_size: blob.size
         }, { onConflict: "storage_path" });
         if (metadata.error) throw metadata.error;
-        uploadedImageContent.set(storagePath, element.content);
+        uploadedImagePaths.set(cacheKey, storagePath);
       }
       return { ...element, content: `${STORAGE_PREFIX}${storagePath}` };
     }))
@@ -135,9 +139,9 @@ async function saveDocument(
     id: document.id, project_id: projectId, user_id: userId,
     title: document.title, document, schema_version: document.schemaVersion,
     updated_at: updatedAt
-  }, { onConflict: "id" });
+  }, { onConflict: "id" }).select("updated_at").single<{ updated_at: string }>();
   if (result.error) throw result.error;
-  return updatedAt;
+  return result.data.updated_at;
 }
 
 export async function bootstrapCloudDocument(
