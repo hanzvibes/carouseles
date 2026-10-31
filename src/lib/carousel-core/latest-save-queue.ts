@@ -6,7 +6,7 @@ export function createLatestSaveQueue<T>(
   save: (snapshot: T) => Promise<void>,
   onError: (error: unknown) => void = () => undefined
 ): LatestSaveQueue<T> {
-  let pendingSnapshot: T;
+  let pendingSnapshot = undefined as T;
   let hasPendingSnapshot = false;
   let isSaving = false;
 
