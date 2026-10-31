@@ -136,13 +136,18 @@ export default function EditorPage() {
     if (file.size > 5 * 1024 * 1024) { setExportStatus("Image must be 5 MB or smaller."); return; }
     const reader = new FileReader();
     reader.onload = () => {
-      const element: CarouselElement = {
-        id: makeId(), type: "image", x: 100, y: 160, width: 880, height: 620,
-        rotation: 0, content: String(reader.result),
-        style: { backgroundColor: "#eeeeee" }
-      };
-      updatePage((items) => [...items, element]);
-      setSelectedId(element.id);
+      const imageData = String(reader.result);
+      if (selectedElement?.type === "image") {
+        updatePage((items) => items.map((item) => item.id === selectedElement.id ? { ...item, content: imageData } : item));
+      } else {
+        const element: CarouselElement = {
+          id: makeId(), type: "image", x: 100, y: 160, width: 880, height: 620,
+          rotation: 0, content: imageData,
+          style: { backgroundColor: "#eeeeee" }
+        };
+        updatePage((items) => [...items, element]);
+        setSelectedId(element.id);
+      }
       setExportStatus("");
     };
     reader.onerror = () => setExportStatus("Could not read this image.");
