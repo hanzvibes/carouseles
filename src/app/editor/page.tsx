@@ -368,7 +368,7 @@ export default function EditorPage() {
         context.font = `${element.style.fontWeight ?? "normal"} ${fontSize}px ${element.style.fontFamily ?? "Arial"}`;
         context.textAlign = element.style.textAlign ?? "left";
         context.textBaseline = "top";
-        const words = element.content.split(/\\s+/);
+        const words = element.content.split(/\s+/);
         const lines: string[] = [];
         let line = "";
         for (const word of words) {
