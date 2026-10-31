@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { bootstrapCloudDocument, saveCloudDocument } from "@/lib/carousel-core/cloud";
+import { ANONYMOUS_DRAFT_STORAGE_KEY, LEGACY_DRAFT_STORAGE_KEY, canReadLegacyDraft, getDraftStorageKey } from "@/lib/carousel-core/draft-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createEmptyCarouselDocument,
@@ -11,17 +12,11 @@ import {
   validateCarouselDocument
 } from "@/lib/carousel-core/schema";
 
-const ANONYMOUS_STORAGE_KEY = "carouseles:local-draft:anonymous:v1";
-const LEGACY_STORAGE_KEY = "carouseles:local-draft:v1";
-
-function userStorageKey(userId: string) {
-  return `carouseles:local-draft:user:${userId}:v1`;
-}
 
 function readLocalDraft(storageKey: string, legacyFallback = false): CarouselDocument | null {
   try {
     const raw = window.localStorage.getItem(storageKey)
-      ?? (legacyFallback ? window.localStorage.getItem(LEGACY_STORAGE_KEY) : null);
+      ?? (legacyFallback ? window.localStorage.getItem(LEGACY_DRAFT_STORAGE_KEY) : null);
     return raw ? validateCarouselDocument(JSON.parse(raw)) : null;
   } catch {
     return null;
@@ -42,7 +37,7 @@ export default function EditorPage() {
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [cloudUserId, setCloudUserId] = useState<string | null>(null);
-  const [draftStorageKey, setDraftStorageKey] = useState(ANONYMOUS_STORAGE_KEY);
+  const [draftStorageKey, setDraftStorageKey] = useState(ANONYMOUS_DRAFT_STORAGE_KEY);
   const [cloudProjectId, setCloudProjectId] = useState<string | null>(null);
   const [cloudStatus, setCloudStatus] = useState("Local draft");
   const [cloudError, setCloudError] = useState("");
@@ -58,7 +53,7 @@ export default function EditorPage() {
       const supabase = createSupabaseBrowserClient();
 
       if (!supabase) {
-        const localDocument = readLocalDraft(ANONYMOUS_STORAGE_KEY, true);
+        const localDocument = readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
         if (!cancelled && localDocument) {
           setDocument(localDocument);
           setActivePageId(localDocument.pages[0].id);
@@ -76,7 +71,7 @@ export default function EditorPage() {
 
         if (!auth.data.user) {
           // Never upload an anonymous draft into a signed-in account.
-          const localDocument = readLocalDraft(ANONYMOUS_STORAGE_KEY, true);
+          const localDocument = readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
           if (!cancelled && localDocument) {
             setDocument(localDocument);
             setActivePageId(localDocument.pages[0].id);
@@ -92,8 +87,8 @@ export default function EditorPage() {
         const userId = auth.data.user.id;
         authenticatedUserId = userId;
         setCloudUserId(userId);
-        setDraftStorageKey(userStorageKey(userId));
-        const localDocument = readLocalDraft(userStorageKey(userId));
+        setDraftStorageKey(getDraftStorageKey(userId));
+        const localDocument = readLocalDraft(getDraftStorageKey(userId), canReadLegacyDraft(userId));
         const bootstrap = await bootstrapCloudDocument(supabase, localDocument);
         if (cancelled) return;
 
@@ -106,8 +101,8 @@ export default function EditorPage() {
       } catch (error) {
         if (cancelled) return;
         const localDocument = authenticatedUserId
-          ? readLocalDraft(userStorageKey(authenticatedUserId))
-          : readLocalDraft(ANONYMOUS_STORAGE_KEY, true);
+          ? readLocalDraft(getDraftStorageKey(authenticatedUserId), canReadLegacyDraft(authenticatedUserId))
+          : readLocalDraft(ANONYMOUS_DRAFT_STORAGE_KEY, canReadLegacyDraft(null));
         if (localDocument) {
           setDocument(localDocument);
           setActivePageId(localDocument.pages[0].id);
@@ -233,7 +228,7 @@ export default function EditorPage() {
 
   function addImage(file?: File) {
     if (!file) return;
-    if (!file.type.startsWith("image/")) { setExportStatus("Choose an image file."); return; }
+    if (!["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"].includes(file.type)) { setExportStatus("Use a JPG, PNG, WebP, GIF, or SVG image."); return; }
     if (file.size > 2 * 1024 * 1024) { setExportStatus("Image must be 2 MB or smaller."); return; }
     const currentSize = new Blob([JSON.stringify(document)]).size;
     if (currentSize + file.size * 1.4 > 3.5 * 1024 * 1024) { setExportStatus("This draft is near the browser storage limit. Remove an image first."); return; }
