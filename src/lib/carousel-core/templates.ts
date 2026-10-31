@@ -1,4 +1,4 @@
-import type { CarouselDocument, CarouselElement } from "@/lib/carousel-core/schema";
+import type { CarouselDocument, CarouselElement } from "./schema";
 import { validateCarouselDocument } from "@/lib/carousel-core/schema";
 import { z } from "zod";
 
