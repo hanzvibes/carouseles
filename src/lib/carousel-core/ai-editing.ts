@@ -7,7 +7,15 @@ export const slideEditRequestSchema = z.object({
     id: z.string().min(1).max(100),
     content: z.string().max(2000)
   }).strict()).min(1).max(20)
-}).strict();
+}).strict().superRefine((value, context) => {
+  const ids = value.elements.map((element) => element.id);
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({ code: "custom", message: "Text element IDs must be unique.", path: ["elements"] });
+  }
+  if (value.elements.some((element) => /^data:/i.test(element.content))) {
+    context.addIssue({ code: "custom", message: "Image data must never be sent to the AI editor.", path: ["elements"] });
+  }
+});
 
 export const slideTextEditsSchema = z.object({
   edits: z.array(z.object({
