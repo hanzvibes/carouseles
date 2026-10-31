@@ -41,7 +41,7 @@ Animated video export, social scheduling, multiplayer editing, arbitrary code ex
 
 ## Development status
 
-This repository now includes an initial dashboard, a browser-based multi-slide editor, text and shape editing, local draft persistence, PNG export for the active slide, and Carousel Core schema validation. Cloud projects, AI generation, image elements, PDF export, and production deployment are not implemented yet.
+This repository now includes an initial dashboard, a browser-based multi-slide editor, draggable/resizable text and shape elements, image upload and replacement, local draft persistence, PNG export (including images) for the active slide, and Carousel Core schema validation. Cloud projects, AI generation, image elements, PDF export, and production deployment are not implemented yet.
 
 ## Documentation
 
