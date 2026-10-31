@@ -35,7 +35,7 @@ export default function Home() {
         </div>
       </aside>
       <section className="main-panel">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> Overview</div><div className="top-actions"><Link className="nav-item" href="/login">Sign in</Link><div className="top-avatar">R</div></div></header>
+        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> Overview</div><div className="top-actions"><Link className="nav-item" href="/settings/providers">AI providers</Link><Link className="nav-item" href="/login">Sign in</Link><div className="top-avatar">R</div></div></header>
         <div className="content">
           <section className="welcome-row"><div><div className="eyebrow">YOUR CREATIVE WORKSPACE</div><h1>Make ideas <em>scroll-stopping.</em></h1><p>From a rough thought to a carousel worth saving.</p></div><Link className="primary-button" href="/editor"><span>＋</span> New carousel</Link></section>
           <section className="prompt-card">
